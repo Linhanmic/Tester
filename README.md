@@ -1,71 +1,35 @@
-# tester README
+# Tester
 
-This is the README for your extension "tester". After writing up a brief description, we recommend including the following sections.
+为 Tester 语言提供完整的 VS Code 支持。Tester 是一种专门用于汽车 CAN/CAN-FD 总线测试的领域特定语言(DSL)。
 
-## Features
+## 功能特性
 
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
+### 🎨 语法高亮
 
-For example if there is an image subfolder under your extension project workspace:
+- 关键字高亮
+- 命令高亮
+- 数值和十六进制高亮
+- 注释支持
 
-\!\[feature X\]\(images/feature-x.png\)
+### 📝 代码片段
 
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
+- 配置块模板 (`tset`)
+- 测试用例集模板 (`ttitle`)
+- 测试用例模板 (`tstart`)
+- 常用命令片段 (`tcans`, `tcanr`, `tdelay`)
+- 完整示例模板 (`ttemplate`)
 
-## Requirements
+## 反馈和贡献
 
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
+- 问题反馈: [GitHub Issues](https://github.com/Linhanmic/Tester/issues)
+- 功能建议: [GitHub Discussions](https://github.com/Linhanmic/Tester/discussions)
 
-## Extension Settings
+## 许可证
 
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
+MIT License
 
-For example:
+Copyright (c) 2025 Linhanmic
 
-This extension contributes the following settings:
+## 致谢
 
-* `myExtension.enable`: Enable/disable this extension.
-* `myExtension.thing`: Set to `blah` to do something.
-
-## Known Issues
-
-Calling out known issues can help limit users opening duplicate issues against your extension.
-
-## Release Notes
-
-Users appreciate release notes as you update your extension.
-
-### 1.0.0
-
-Initial release of ...
-
-### 1.0.1
-
-Fixed issue #.
-
-### 1.1.0
-
-Added features X, Y, and Z.
-
----
-
-## Following extension guidelines
-
-Ensure that you've read through the extensions guidelines and follow the best practices for creating your extension.
-
-* [Extension Guidelines](https://code.visualstudio.com/api/references/extension-guidelines)
-
-## Working with Markdown
-
-You can author your README using Visual Studio Code. Here are some useful editor keyboard shortcuts:
-
-* Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux).
-* Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux).
-* Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets.
-
-## For more information
-
-* [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-* [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
-
-**Enjoy!**
+感谢 Tester 语言规范的制定者和所有贡献者。
