@@ -1,0 +1,305 @@
+{
+    "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+    "name": "Tester",
+    "scopeName": "source.tester",
+    "patterns": [
+        {
+            "include": "#comments"
+        },
+        {
+            "include": "#commands"
+        },
+        {
+            "include": "#configuration-block"
+        },
+        {
+            "include": "#test-case"
+        },
+        {
+            "include": "#test-suite"
+        }
+    ],
+    "repository": {
+        "comments": {
+            "patterns": [
+                {
+                    "name": "comment.line.double-slash.tester",
+                    "match": "//.*$"
+                }
+            ]
+        },
+        "tcaninit-command": {
+            "name": "meta.command.channel-init.tester",
+            "match": "\\b(tcaninit)\\s+(\\d+)\\s*,\\s*(\\d+)\\s*,\\s*(\\d+)\\s*,\\s*(\\d+)(?:\\s*,\\s*(\\d+))?",
+            "captures": {
+                "1": {
+                    "name": "keyword.command.channel-init.tester"
+                },
+                "2": {
+                    "name": "constant.numeric.device-id.tester"
+                },
+                "3": {
+                    "name": "constant.numeric.device-index.tester"
+                },
+                "4": {
+                    "name": "constant.numeric.channel-index.tester"
+                },
+                "5": {
+                    "name": "constant.numeric.baudrate.arbitration.tester"
+                },
+                "6": {
+                    "name": "constant.numeric.baudrate.data.tester"
+                }
+            }
+        },
+        "diagnose-commands": {
+            "patterns": [
+                {
+                    "name": "meta.command.diagnose.request-id.tester",
+                    "match": "\\b(tdiagnose_rid)\\s+((?:0x)?[0-9A-Fa-f]+)\\b",
+                    "captures": {
+                        "1": {
+                            "name": "keyword.command.config.diagnose.response-id.tester"
+                        },
+                        "2": {
+                            "name": "constant.numeric.hex.message-id.tester"
+                        }
+                    }
+                },
+                {
+                    "name": "meta.command.diagnose.response-id.tester",
+                    "match": "\\b(tdiagnose_sid)\\s+((?:0x)?[0-9A-Fa-f]+)\\b",
+                    "captures": {
+                        "1": {
+                            "name": "keyword.command.config.diagnose.request-id.tester"
+                        },
+                        "2": {
+                            "name": "constant.numeric.hex.message-id.tester"
+                        }
+                    }
+                },
+                {
+                    "name": "meta.command.diagnose.key.tester",
+                    "match": "\\b(tdiagnose_keyk)\\s+((?:0x)?[0-9A-Fa-f]+)\\b",
+                    "captures": {
+                        "1": {
+                            "name": "keyword.command.config.diagnose.tester"
+                        },
+                        "2": {
+                            "name": "constant.numeric.hex.key.tester"
+                        }
+                    }
+                }
+            ]
+        },
+        "dtc-config": {
+            "name": "meta.config.dtc.tester",
+            "match": "\\b(tdiagnose_dtc)\\s+((?:0x)?[A-Za-z0-9x]+)\\s*,\\s*(.+)$",
+            "captures": {
+                "1": {
+                    "name": "keyword.command.config.dtc.tester"
+                },
+                "2": {
+                    "name": "constant.other.dtc-code.tester"
+                },
+                "3": {
+                    "name": "string.unquoted.description.tester"
+                }
+            }
+        },
+        "tcans-command": {
+            "name": "meta.command.send.tester",
+            "match": "\\b(tcans)\\s+(?:(\\d+)\\s*,\\s*)?((?:0x)?[0-9A-Fa-f]+)\\s*,\\s*([0-9A-Fa-f]+(?:[-\\s][0-9A-Fa-f]+)*)\\s*,\\s*(\\d+)\\s*,\\s*(\\d+)",
+            "captures": {
+                "1": {
+                    "name": "keyword.command.send.tester"
+                },
+                "2": {
+                    "name": "variable.parameter.channel.tester"
+                },
+                "3": {
+                    "name": "constant.numeric.hex.message-id.tester"
+                },
+                "4": {
+                    "name": "constant.numeric.byte-sequence.tester"
+                },
+                "5": {
+                    "name": "constant.numeric.interval.tester"
+                },
+                "6": {
+                    "name": "constant.numeric.repeat.tester"
+                }
+            }
+        },
+        "tcanr-command": {
+            "patterns": [
+                {
+                    "name": "meta.command.receive.print.tester",
+                    "match": "\\b(tcanr)\\s+(?:(\\d+)\\s*,\\s*)?((?:0x)?[0-9A-Fa-f]+)\\s*,\\s*([0-9.+\\-]+)\\s*,\\s*(print)\\b",
+                    "captures": {
+                        "1": {
+                            "name": "keyword.command.receive.tester"
+                        },
+                        "2": {
+                            "name": "variable.parameter.channel.tester"
+                        },
+                        "3": {
+                            "name": "constant.numeric.hex.message-id.tester"
+                        },
+                        "4": {
+                            "name": "constant.numeric.bit-range.tester"
+                        },
+                        "5": {
+                            "name": "keyword.other.print.tester"
+                        }
+                    }
+                },
+                {
+                    "name": "meta.command.receive.verify.tester",
+                    "match": "\\b(tcanr)\\s+(?:(\\d+)\\s*,\\s*)?((?:0x)?[0-9A-Fa-f]+)\\s*,\\s*([0-9.+-]+)\\s*,\\s*((?:0x)?[0-9A-Fa-f+]+)\\s*,\\s*(\\d+)",
+                    "captures": {
+                        "1": {
+                            "name": "keyword.command.receive.tester"
+                        },
+                        "2": {
+                            "name": "variable.parameter.channel.tester"
+                        },
+                        "3": {
+                            "name": "constant.numeric.hex.message-id.tester"
+                        },
+                        "4": {
+                            "name": "constant.numeric.bit-range.tester"
+                        },
+                        "5": {
+                            "name": "constant.numeric.expected-value.tester"
+                        },
+                        "6": {
+                            "name": "constant.numeric.timeout.tester"
+                        }
+                    }
+                }
+            ]
+        },
+        "tdelay-command": {
+            "name": "meta.command.delay.tester",
+            "match": "\\b(tdelay)\\s+(\\d+)\\b",
+            "captures": {
+                "1": {
+                    "name": "keyword.command.control.tester"
+                },
+                "2": {
+                    "name": "constant.numeric.delay.tester"
+                }
+            }
+        },
+        "commands": {
+            "patterns": [
+                {
+                    "include": "#tcaninit-command"
+                },
+                {
+                    "include": "#diagnose-commands"
+                },
+                {
+                    "include": "#dtc-config"
+                },
+                {
+                    "include": "#tcans-command"
+                },
+                {
+                    "include": "#tcanr-command"
+                },
+                {
+                    "include": "#tdelay-command"
+                }
+            ]
+        },
+        "configuration-block": {
+            "name": "meta.configuration.block.tester",
+            "begin": "\\b(tset)\\b",
+            "end": "\\b(tend)\\b",
+            "beginCaptures": {
+                "1": {
+                    "name": "keyword.control.config.start.tester"
+                }
+            },
+            "endCaptures": {
+                "1": {
+                    "name": "keyword.control.config.end.tester"
+                }
+            },
+            "patterns": [
+                {
+                    "include": "#comments"
+                },
+                {
+                    "include": "#tcaninit-command"
+                },
+                {
+                    "include": "#diagnose-commands"
+                },
+                {
+                    "include": "#dtc-config"
+                },
+                {
+                    "include": "#tcans-command"
+                }
+            ]
+        },
+        "test-case": {
+            "name": "meta.test-case.tester",
+            "begin": "(?:(\\d+)\\s+)?\\b(tstart)\\s*=\\s*(.+)$",
+            "end": "\\b(tend)\\b",
+            "beginCaptures": {
+                "1": {
+                    "name": "constant.numeric.sequence.tester"
+                },
+                "2": {
+                    "name": "keyword.control.case.start.tester"
+                },
+                "3": {
+                    "name": "entity.name.function.test-case.tester"
+                }
+            },
+            "endCaptures": {
+                "1": {
+                    "name": "keyword.control.case.end.tester"
+                }
+            },
+            "patterns": [
+                {
+                    "include": "#comments"
+                },
+                {
+                    "include": "#commands"
+                }
+            ]
+        },
+        "test-suite": {
+            "name": "meta.test-suite.tester",
+            "begin": "\\b(ttitle)[\\s*]=[\\s*](.+)$",
+            "end": "\\b(ttitle-end)\\b",
+            "beginCaptures": {
+                "1": {
+                    "name": "keyword.control.suite.start.tester"
+                },
+                "2": {
+                    "name": "entity.name.section.suite.tester"
+                }
+            },
+            "endCaptures": {
+                "1": {
+                    "name": "keyword.control.suite.end.tester"
+                }
+            },
+            "patterns": [
+                {
+                    "include": "#comments"
+                },
+                {
+                    "include": "#test-case"
+                }
+            ]
+        }
+    }
+}

@@ -1,0 +1,89 @@
+{
+  "name": "tester",
+  "displayName": "Tester",
+  "description": "Tester语言支持插件，用于CAN总线通信的开发、测试和调试。",
+  "version": "0.0.1",
+  "publisher": "林寒",
+  "author": {
+    "name": "林寒",
+    "email": "linhanmic@qq.com",
+    "url": "https://linhanmic.github.io/"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "github",
+    "url": "https://github.com/Linhanmic/Tester.git"
+  },
+  "homepage": "https://github.com/Linhanmic/Tester#readme",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "tester",
+        "aliases": [
+          "Tester",
+          "tester"
+        ],
+        "extensions": [
+          ".tester",
+          ".tst",
+          ".txt"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "tester",
+        "scopeName": "source.tester",
+        "path": "./syntaxes/tester.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "tester",
+        "path": "./snippets/tester.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "tester.helloWorld",
+        "title": "Hello World"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "npm run check-types && npm run lint && node esbuild.js",
+    "watch": "npm-run-all -p watch:*",
+    "watch:esbuild": "node esbuild.js --watch",
+    "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
+    "package": "npm run check-types && npm run lint && node esbuild.js --production",
+    "compile-tests": "tsc -p . --outDir out",
+    "watch-tests": "tsc -p . -w --outDir out",
+    "pretest": "npm run compile-tests && npm run compile && npm run lint",
+    "check-types": "tsc --noEmit",
+    "lint": "eslint src",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.105.0",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "22.x",
+    "@typescript-eslint/eslint-plugin": "^8.45.0",
+    "@typescript-eslint/parser": "^8.45.0",
+    "eslint": "^9.36.0",
+    "esbuild": "^0.25.10",
+    "npm-run-all": "^4.1.5",
+    "typescript": "^5.9.3",
+    "@vscode/test-cli": "^0.0.11",
+    "@vscode/test-electron": "^2.5.2"
+  }
+}

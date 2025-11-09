@@ -1,0 +1,121 @@
+{
+    "Configuration Block": {
+        "prefix": "tset",
+        "body": [
+            "tset",
+            "\t// 项目通道初始化",
+            "\ttcaninit ${1:设备ID},${2:设备索引},${3:设备通道索引},${4:仲裁波特率},${5:数据波特率}",
+            "\t// 诊断配置",
+            "\ttdiagnose_rid ${6:诊断响应ID}",
+            "\ttdiagnose_sid ${7:诊断请求ID}",
+            "\ttdiagnose_keyk ${8:诊断密钥KKey}",
+            "\t// 故障码配置",
+            "\ttdiagnose_dtc ${9:故障码},${10:故障描述}",
+            "tend",
+            "$0"
+        ],
+        "description": "创建完整的配置块"
+    },
+    "Channel Init": {
+        "prefix": "tcaninit",
+        "body": [
+            "tcaninit ${1:设备ID},${2:设备索引},${3:设备通道索引},${4:仲裁波特率},${5:数据波特率}"
+        ],
+        "description": "初始化CAN/CAN-FD通道"
+    },
+    "Diagnose Config": {
+        "prefix": "tdiag",
+        "body": [
+            "tdiagnose_rid ${1:诊断响应ID}",
+            "tdiagnose_sid ${2:诊断请求ID}",
+            "tdiagnose_keyk ${3:诊断密钥KKey}"
+        ],
+        "description": "诊断配置"
+    },
+    "DTC Config": {
+        "prefix": "tdtc",
+        "body": [
+            "tdiagnose_dtc ${1:故障码},${2:故障描述}"
+        ],
+        "description": "故障码配置"
+    },
+    "Test Suite": {
+        "prefix": "ttitle",
+        "body": [
+            "ttitle=${1:测试用例集名称}",
+            "\ttstart=${2:测试用例名称}",
+            "\t\t$0",
+            "\ttend",
+            "ttitle-end"
+        ],
+        "description": "创建测试用例集"
+    },
+    "Test Case": {
+        "prefix": "tstart",
+        "body": [
+            "tstart=${2:测试用例名称}",
+            "\t$0",
+            "tend"
+        ],
+        "description": "创建测试用例"
+    },
+    "CAN Send": {
+        "prefix": "tcans",
+        "body": [
+            "tcans ${1:项目通道},${2:报文ID},${3:报文数据},${4:发送间隔(毫秒)},${5:发送次数}"
+        ],
+        "description": "发送CAN报文"
+    },
+    "CAN Receive with Check": {
+        "prefix": "tcanr",
+        "body": [
+            "tcanr ${1:项目通道},${2:报文ID},${3:数据范围},${4:预期值},${5:超时时间(毫秒)}"
+        ],
+        "description": "接收并校验CAN报文"
+    },
+    "CAN Receive with Print": {
+        "prefix": "tcanr-print",
+        "body": [
+            "tcanr ${1:项目通道},${2:报文ID},${3:数据范围},print"
+        ],
+        "description": "接收并输出CAN报文数据"
+    },
+    "Delay": {
+        "prefix": "tdelay",
+        "body": [
+            "tdelay ${1:延时时间(毫秒)}"
+        ],
+        "description": "延时(毫秒)"
+    },
+    "Full Example": {
+        "prefix": "ttemplate",
+        "body": [
+            "// Tester测试文件模板",
+            "",
+            "// 设备配置块",
+            "tset",
+            "\t// 项目通道初始化",
+            "\ttcaninit ${1:设备ID},${2:设备索引},${3:设备通道索引},${4:仲裁波特率},${5:数据波特率}",
+            "\n\t// 诊断配置",
+            "\ttdiagnose_rid ${6:诊断响应ID}",
+            "\ttdiagnose_sid ${7:诊断请求ID}",
+            "\ttdiagnose_keyk ${8:诊断密钥KKey}",
+            "\n\t// 故障码配置",
+            "\ttdiagnose_dtc ${9:故障码},${10:故障描述}",
+            "tend",
+            "",
+            "// 测试用例集",
+            "ttitle=${10:功能测试}",
+            "\t// 测试用例",
+            "\ttstart=${11:基本通信测试}",
+            "\t\t// 测试命令",
+            "\t\ttcans ${12:项目通道},${13:报文ID},${14:报文数据},${15:发送间隔},${16:发送次数}",
+            "\t\ttcanr ${17:项目通道},${18:报文ID},${19:数据范围},${20:预期值},${21:超时时间}",
+            "\t\ttdelay ${22:延时时间(毫秒)}",
+            "\ttend",
+            "ttitle-end",
+            "$0"
+        ],
+        "description": "完整的测试文件模板"
+    }
+}
