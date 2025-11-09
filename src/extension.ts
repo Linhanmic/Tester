@@ -1,6 +1,8 @@
 import * as vscode from "vscode";
 import { TesterValidator } from "./validator";
 import { TesterFoldingRangeProvider } from "./foldingProvider";
+import { TesterDocumentSymbolProvider } from "./symbolProvider";
+import { TesterHoverProvider } from "./hoverProvider";
 
 // 全局诊断集合
 let diagnosticCollection: vscode.DiagnosticCollection;
@@ -21,6 +23,19 @@ export function activate(context: vscode.ExtensionContext) {
       "tester",
       new TesterFoldingRangeProvider()
     )
+  );
+
+  // 注册文档符号提供程序（大纲视图）
+  context.subscriptions.push(
+    vscode.languages.registerDocumentSymbolProvider(
+      "tester",
+      new TesterDocumentSymbolProvider()
+    )
+  );
+
+  // 注册悬停提示提供程序
+  context.subscriptions.push(
+    vscode.languages.registerHoverProvider("tester", new TesterHoverProvider())
   );
 
   // ========== 文档事件监听 ==========
