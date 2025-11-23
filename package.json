@@ -56,6 +56,30 @@
       {
         "command": "tester.helloWorld",
         "title": "Hello World"
+      },
+      {
+        "command": "tester.runSingleTest",
+        "title": "Tester: 运行单个测试"
+      },
+      {
+        "command": "tester.debugSingleTest",
+        "title": "Tester: 调试单个测试"
+      },
+      {
+        "command": "tester.runAllFileTests",
+        "title": "Tester: 运行文件中所有测试"
+      },
+      {
+        "command": "tester.runBaudRateUnitTests",
+        "title": "Tester: 运行波特率配置单元测试"
+      },
+      {
+        "command": "tester.runBaudRateDeviceTests",
+        "title": "Tester: 运行波特率配置设备测试"
+      },
+      {
+        "command": "tester.runZlgCanTests",
+        "title": "Tester: 运行ZLG CAN测试"
       }
     ]
   },
@@ -78,6 +102,9 @@
     "copy:native": "node -e \"require('fs').copyFileSync('build/Release/zlgcan.node', 'src/zlgcan/lib/zlgcan.node')\"",
     "copy:native:debug": "node -e \"require('fs').copyFileSync('build/Debug/zlgcan.node', 'src/zlgcan/lib/zlgcan.node')\"",
     "test:zlgcan": "npx ts-node test/zlgcan.test.ts",
+    "test:baudrate": "npx ts-node test/baud-rate-config.test.ts",
+    "test:baudrate:unit": "npx ts-node test/baud-rate-config.test.ts --unit",
+    "test:baudrate:device": "npx ts-node test/baud-rate-config.test.ts --device",
     "package:extension": "vsce package"
   },
   "devDependencies": {

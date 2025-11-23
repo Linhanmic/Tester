@@ -3,27 +3,27 @@
  * 测试设备: ZCAN_USBCANFD_200U
  * 连接拓扑: 通道0 <-> 通道1 (两通道物理连接)
  * 测试内容: 打开设备、初始化通道、双通道收发、回调接收、关闭设备
+ *
+ * 使用新的baudrate模块进行配置，避免复杂的波特率计算
  */
 
-import { ZlgCanDevice, DeviceType, CanType, CanFDFrame, ReceivedFDFrame, CanChannelConfig } from '../src/zlgcan';
+import {
+    ZlgCanDevice,
+    DeviceType,
+    CanFDFrame,
+    ReceivedFDFrame,
+    // 使用新的配置模块
+    DEFAULT_CANFD_CONFIG,
+    getChannelConfig,
+    configureChannelWithSetValue,
+} from '../src/zlgcan';
 
 // 测试配置
 const TEST_CONFIG = {
     deviceType: DeviceType.ZCAN_USBCANFD_200U,
     deviceIndex: 0,
-    // CANFD配置
-    canfdConfig: {
-        canType: CanType.TYPE_CANFD,
-        accCode: 0,
-        accMask: 0xFFFFFFFF,
-        abitTiming: 0x00016D01,
-        dbitTiming: 0x00016D01,
-        brp: 0,
-        filter: 0,
-        mode: 0,
-        pad: 0,
-        reserved: 0,
-    } as CanChannelConfig,
+    // 使用默认CANFD配置 (500kbps/2Mbps, 终端电阻使能)
+    canfdConfig: getChannelConfig(DEFAULT_CANFD_CONFIG),
 };
 
 // 测试结果记录
@@ -100,32 +100,20 @@ function testGetDeviceInfo(device: ZlgCanDevice): boolean {
 
 /**
  * 配置通道波特率和终端电阻（必须在 initCanChannel 之前调用）
+ * 使用新的baudrate模块简化配置
  */
 function configureChannel(device: ZlgCanDevice, channelIndex: number): boolean {
-    const ch = channelIndex.toString();
+    // 使用新的configureChannelWithSetValue函数，自动应用默认CANFD配置
+    // 默认配置: 500kbps/2Mbps, 终端电阻使能, CAN FD ISO, 发送重试到总线关闭
+    const result = configureChannelWithSetValue(device, channelIndex, DEFAULT_CANFD_CONFIG);
 
-    // 设置仲裁域波特率 (500kbps)
-    const abitResult = device.setValue(`${ch}/canfd_abit_baud_rate`, "500000");
-    if (abitResult === 0) {
-        console.log(`  警告: 通道${ch} 设置仲裁段波特率失败`);
+    if (!result.success) {
+        console.log(`  警告: 通道${channelIndex} 配置失败:`);
+        result.errors.forEach(err => console.log(`    - ${err}`));
         return false;
     }
 
-    // 设置数据域波特率 (2Mbps)
-    const dbitResult = device.setValue(`${ch}/canfd_dbit_baud_rate`, "2000000");
-    if (dbitResult === 0) {
-        console.log(`  警告: 通道${ch} 设置数据段波特率失败`);
-        return false;
-    }
-
-    // 使能终端电阻（两通道互连测试必需）
-    const resistResult = device.setValue(`${ch}/initenal_resistance`, "1");
-    if (resistResult === 0) {
-        console.log(`  警告: 通道${ch} 使能终端电阻失败`);
-        return false;
-    }
-
-    console.log(`  通道${ch} 配置成功: 500kbps/2Mbps, 终端电阻已使能`);
+    console.log(`  通道${channelIndex} 配置成功: 500kbps/2Mbps, 终端电阻已使能`);
     return true;
 }
 

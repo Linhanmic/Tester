@@ -344,5 +344,8 @@ export class ZlgCanDevice {
     }
 }
 
+// 导出波特率配置模块
+export * from './baudrate';
+
 // 导出默认的ZlgCanDevice类
 export default ZlgCanDevice;
