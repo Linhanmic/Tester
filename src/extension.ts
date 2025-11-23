@@ -4,6 +4,7 @@ import { TesterFoldingRangeProvider } from "./foldingProvider";
 import { TesterDocumentSymbolProvider } from "./symbolProvider";
 import { TesterHoverProvider } from "./hoverProvider";
 import { TesterCodeLensProvider } from "./codeLensProvider";
+import { TesterFormattingProvider } from "./formatting";
 
 // 全局诊断集合
 let diagnosticCollection: vscode.DiagnosticCollection;
@@ -44,6 +45,14 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.languages.registerCodeLensProvider(
       "tester",
       new TesterCodeLensProvider()
+    )
+  );
+
+  // 注册格式化提供程序
+  context.subscriptions.push(
+    vscode.languages.registerDocumentFormattingEditProvider(
+      "tester",
+      new TesterFormattingProvider()
     )
   );
   // ========== 文档事件监听 ==========
