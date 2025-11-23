@@ -30,7 +30,7 @@ export class TesterFoldingRangeProvider implements vscode.FoldingRangeProvider {
         stack.push({ type: "ttitle", line: i, matched: false });
       }
       // tstart 块开始
-      else if (line.match(/^(?:\d+\s+)?\btstart\b=.*$/)) {
+      else if (line.match(/(?:[\d\s]*)?(tstart)\s*=\s*(.*)$/)) {
         stack.push({ type: "tstart", line: i, matched: false });
       } else if (line === "tend") {
         // 从栈顶找到最近的 tset 或 tstart
@@ -78,7 +78,7 @@ export class TesterFoldingRangeProvider implements vscode.FoldingRangeProvider {
             }
             stack[j].matched = true;
             // 移除已匹配的项
-            stack.splice(j, 1);
+            stack.splice(j, stack.length - j);
             found = true;
             break;
           }

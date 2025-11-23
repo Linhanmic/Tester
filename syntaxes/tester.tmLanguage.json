@@ -247,7 +247,7 @@
             ]
         },
         "test-case": {
-            "name": "meta.test-case.tester",
+            "name": "meta.test-suit.test-case.tester",
             "begin": "(?:(\\d+)\\s+)?\\b(tstart)\\s*=\\s*(.+)$",
             "end": "\\b(tend)\\b",
             "beginCaptures": {

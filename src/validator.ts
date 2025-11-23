@@ -23,6 +23,13 @@ export class TesterValidator {
     const errors: ValidationError[] = [];
     const text = document.getText();
     const lines = text.split("\n");
+    //删除//之后的注释内容
+    for (let i = 0; i < lines.length; i++) {
+      const commentIndex = lines[i].indexOf("//");
+      if (commentIndex !== -1) {
+        lines[i] = lines[i].substring(0, commentIndex).trimEnd();
+      }
+    }
 
     // 获取细粒度规则配置
     const rules = config.get<any>("validation.rules", {

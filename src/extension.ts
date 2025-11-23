@@ -3,6 +3,7 @@ import { TesterValidator } from "./validator";
 import { TesterFoldingRangeProvider } from "./foldingProvider";
 import { TesterDocumentSymbolProvider } from "./symbolProvider";
 import { TesterHoverProvider } from "./hoverProvider";
+import { TesterCodeLensProvider } from "./codeLensProvider";
 
 // 全局诊断集合
 let diagnosticCollection: vscode.DiagnosticCollection;
@@ -38,6 +39,13 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.languages.registerHoverProvider("tester", new TesterHoverProvider())
   );
 
+  // 注册代码透视提供程序
+  context.subscriptions.push(
+    vscode.languages.registerCodeLensProvider(
+      "tester",
+      new TesterCodeLensProvider()
+    )
+  );
   // ========== 文档事件监听 ==========
 
   // 文档打开时验证
