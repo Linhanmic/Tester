@@ -1,12 +1,17 @@
 /**
  * Tester脚本执行器
  * 负责执行解析后的Tester脚本
+ *
+ * 特性：
+ * - 使用真实CAN设备（不支持模拟模式）
+ * - tcans命令使用发送队列，后台持续发送
+ * - tdelay命令延时后执行下一条命令
+ * - 每个测试用例开始时清除发送队列
  */
 
 import * as vscode from "vscode";
 import {
   TesterParser,
-  TesterProgram,
   ConfigurationBlock,
   TestSuite,
   TestCase,
@@ -18,7 +23,7 @@ import {
   BitRange,
 } from "./parser";
 
-// CAN设备相关类型（避免直接依赖可能不存在的native模块）
+// CAN设备相关类型
 interface CanFrame {
   id: number;
   dlc: number;
@@ -62,6 +67,17 @@ interface CanChannelConfig {
   dbitTiming?: number;
   brp?: number;
   pad?: number;
+}
+
+/** 发送队列项 */
+interface SendQueueItem {
+  channelIndex: number;
+  messageId: number;
+  data: number[];
+  intervalMs: number;
+  remainingCount: number;
+  lastSendTime: number;
+  isFD: boolean;
 }
 
 /** 执行结果 */
@@ -115,6 +131,14 @@ export class TesterExecutor {
   private channelConfigs: ChannelConfig[] = [];
   private isCanFD: Map<number, boolean> = new Map(); // 项目通道索引 -> 是否为CAN-FD
 
+  // 发送队列相关
+  private sendQueue: SendQueueItem[] = [];
+  private sendQueueRunning: boolean = false;
+  private sendQueueTimer: ReturnType<typeof setInterval> | null = null;
+
+  // ZLG CAN 模块引用
+  private zlgcanModule: any = null;
+
   constructor() {
     this.outputChannel = vscode.window.createOutputChannel("Tester 执行器");
     this.parser = new TesterParser();
@@ -155,14 +179,20 @@ export class TesterExecutor {
 
     const program = parseResult.program;
 
-    // 初始化设备
+    // 初始化设备（必须成功）
     if (program.configuration) {
       const initResult = await this.initializeDevice(program.configuration);
       if (!initResult.success) {
         this.logError(`设备初始化失败: ${initResult.message}`);
+        vscode.window.showErrorMessage(`设备初始化失败: ${initResult.message}`);
         result.duration = Date.now() - startTime;
         return result;
       }
+    } else {
+      this.logError("缺少配置块，无法初始化设备");
+      vscode.window.showErrorMessage("缺少配置块，无法初始化设备");
+      result.duration = Date.now() - startTime;
+      return result;
     }
 
     try {
@@ -174,7 +204,8 @@ export class TesterExecutor {
         result.totalFailed += suiteResult.failed;
       }
     } finally {
-      // 关闭设备
+      // 停止发送队列并关闭设备
+      this.stopSendQueue();
       await this.closeDevice();
     }
 
@@ -230,11 +261,12 @@ export class TesterExecutor {
       };
     }
 
-    // 初始化设备
+    // 初始化设备（必须成功）
     if (configuration) {
       const initResult = await this.initializeDevice(configuration);
       if (!initResult.success) {
         this.logError(`设备初始化失败: ${initResult.message}`);
+        vscode.window.showErrorMessage(`设备初始化失败: ${initResult.message}`);
         return {
           name: suiteName,
           testCaseResults: [],
@@ -243,12 +275,23 @@ export class TesterExecutor {
           duration: Date.now() - startTime,
         };
       }
+    } else {
+      this.logError("缺少配置块，无法初始化设备");
+      vscode.window.showErrorMessage("缺少配置块，无法初始化设备");
+      return {
+        name: suiteName,
+        testCaseResults: [],
+        passed: 0,
+        failed: 0,
+        duration: Date.now() - startTime,
+      };
     }
 
     let result: TestSuiteResult;
     try {
       result = await this.executeTestSuite(suite);
     } finally {
+      this.stopSendQueue();
       await this.closeDevice();
     }
 
@@ -299,11 +342,12 @@ export class TesterExecutor {
 
     const { testCase, configuration } = parseResult;
 
-    // 初始化设备
+    // 初始化设备（必须成功）
     if (configuration) {
       const initResult = await this.initializeDevice(configuration);
       if (!initResult.success) {
         this.logError(`设备初始化失败: ${initResult.message}`);
+        vscode.window.showErrorMessage(`设备初始化失败: ${initResult.message}`);
         return {
           name: caseName,
           success: false,
@@ -311,12 +355,22 @@ export class TesterExecutor {
           duration: Date.now() - startTime,
         };
       }
+    } else {
+      this.logError("缺少配置块，无法初始化设备");
+      vscode.window.showErrorMessage("缺少配置块，无法初始化设备");
+      return {
+        name: caseName,
+        success: false,
+        commandResults: [],
+        duration: Date.now() - startTime,
+      };
     }
 
     let result: TestCaseResult;
     try {
       result = await this.executeTestCase(testCase);
     } finally {
+      this.stopSendQueue();
       await this.closeDevice();
     }
 
@@ -337,7 +391,7 @@ export class TesterExecutor {
   }
 
   /**
-   * 初始化CAN设备
+   * 初始化CAN设备（不支持模拟模式）
    */
   private async initializeDevice(config: ConfigurationBlock): Promise<ExecutionResult> {
     this.log("初始化CAN设备...");
@@ -348,10 +402,9 @@ export class TesterExecutor {
     try {
       // 动态加载ZlgCanDevice
       // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const zlgcanModule = require("./zlgcan/index.js");
-      const ZlgCanDevice = zlgcanModule.ZlgCanDevice;
-      const DeviceType = zlgcanModule.DeviceType;
-      const CanType = zlgcanModule.CanType;
+      this.zlgcanModule = require("./zlgcan/index.js");
+      const ZlgCanDevice = this.zlgcanModule.ZlgCanDevice;
+      const CanType = this.zlgcanModule.CanType;
 
       this.device = new ZlgCanDevice();
 
@@ -366,7 +419,7 @@ export class TesterExecutor {
       }
 
       // 对每个设备进行初始化
-      for (const [key, channels] of deviceGroups) {
+      for (const [, channels] of deviceGroups) {
         const firstChannel = channels[0];
 
         // 打开设备
@@ -415,19 +468,10 @@ export class TesterExecutor {
       this.log("设备初始化完成\n");
       return { success: true, message: "设备初始化成功" };
     } catch (error: any) {
-      // 如果无法加载设备驱动，使用模拟模式
-      this.log("警告: 无法加载CAN设备驱动，将使用模拟模式");
-      this.log(`  错误详情: ${error.message}`);
-      this.device = null;
-
-      // 为模拟模式设置通道映射
-      for (const channel of config.channels) {
-        this.channelHandles.set(channel.projectChannelIndex, channel.projectChannelIndex);
-        this.isCanFD.set(channel.projectChannelIndex, channel.dataBaudrate !== undefined);
-      }
-
-      this.log("设备初始化完成（模拟模式）\n");
-      return { success: true, message: "使用模拟模式" };
+      return {
+        success: false,
+        message: `加载CAN设备驱动失败: ${error.message}`,
+      };
     }
   }
 
@@ -446,6 +490,116 @@ export class TesterExecutor {
     }
     this.channelHandles.clear();
   }
+
+  // ========== 发送队列管理 ==========
+
+  /**
+   * 清除发送队列
+   */
+  private clearSendQueue(): void {
+    this.sendQueue = [];
+    this.log("    [队列] 发送队列已清除");
+  }
+
+  /**
+   * 添加到发送队列
+   */
+  private addToSendQueue(item: SendQueueItem): void {
+    this.sendQueue.push(item);
+    this.log(`    [队列] 添加发送任务: ID=0x${item.messageId.toString(16).toUpperCase()}, 间隔=${item.intervalMs}ms, 次数=${item.remainingCount}`);
+
+    // 启动发送队列处理器
+    if (!this.sendQueueRunning) {
+      this.startSendQueueProcessor();
+    }
+  }
+
+  /**
+   * 启动发送队列处理器
+   */
+  private startSendQueueProcessor(): void {
+    if (this.sendQueueRunning) {
+      return;
+    }
+
+    this.sendQueueRunning = true;
+    this.sendQueueTimer = setInterval(() => {
+      this.processSendQueue();
+    }, 1); // 1ms 检查一次
+
+    this.log("    [队列] 发送队列处理器已启动");
+  }
+
+  /**
+   * 停止发送队列处理器
+   */
+  private stopSendQueue(): void {
+    if (this.sendQueueTimer) {
+      clearInterval(this.sendQueueTimer);
+      this.sendQueueTimer = null;
+    }
+    this.sendQueueRunning = false;
+    this.sendQueue = [];
+    this.log("    [队列] 发送队列处理器已停止");
+  }
+
+  /**
+   * 处理发送队列
+   */
+  private processSendQueue(): void {
+    if (!this.device || this.sendQueue.length === 0) {
+      return;
+    }
+
+    const now = Date.now();
+    const itemsToRemove: number[] = [];
+
+    for (let i = 0; i < this.sendQueue.length; i++) {
+      const item = this.sendQueue[i];
+
+      // 检查是否到达发送时间
+      if (now - item.lastSendTime >= item.intervalMs) {
+        // 发送报文
+        const channelHandle = this.channelHandles.get(item.channelIndex);
+        if (channelHandle !== undefined) {
+          try {
+            if (item.isFD) {
+              const frame: CanFDFrame = {
+                id: item.messageId,
+                len: item.data.length,
+                data: item.data,
+              };
+              this.device.transmitFD(channelHandle, frame);
+            } else {
+              const frame: CanFrame = {
+                id: item.messageId,
+                dlc: item.data.length,
+                data: item.data,
+              };
+              this.device.transmit(channelHandle, frame);
+            }
+          } catch (error: any) {
+            this.logError(`发送队列发送失败: ${error.message}`);
+          }
+        }
+
+        item.lastSendTime = now;
+        item.remainingCount--;
+
+        // 检查是否完成
+        if (item.remainingCount <= 0) {
+          itemsToRemove.push(i);
+        }
+      }
+    }
+
+    // 移除已完成的项（从后往前移除以避免索引问题）
+    for (let i = itemsToRemove.length - 1; i >= 0; i--) {
+      this.sendQueue.splice(itemsToRemove[i], 1);
+    }
+  }
+
+  // ========== 测试执行 ==========
 
   /**
    * 执行测试用例集
@@ -486,6 +640,9 @@ export class TesterExecutor {
     const seqStr = testCase.sequenceNumber !== undefined ? `[${testCase.sequenceNumber}] ` : "";
     this.log(`\n  ${seqStr}${testCase.name}`);
 
+    // 清除发送队列，避免上一个测试用例的干扰
+    this.clearSendQueue();
+
     const result: TestCaseResult = {
       name: testCase.name,
       success: true,
@@ -500,6 +657,9 @@ export class TesterExecutor {
         result.success = false;
       }
     }
+
+    // 测试用例结束时停止该用例的发送队列
+    this.clearSendQueue();
 
     result.duration = Date.now() - startTime;
     this.log(`    结果: ${result.success ? "PASS" : "FAIL"} (${result.duration}ms)`);
@@ -528,7 +688,7 @@ export class TesterExecutor {
   }
 
   /**
-   * 执行 tcans 命令（发送报文）
+   * 执行 tcans 命令（加入发送队列）
    */
   private async executeTcans(command: TcansCommand): Promise<CommandResult> {
     const dataStr = command.data.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join("-");
@@ -546,51 +706,27 @@ export class TesterExecutor {
       };
     }
 
-    try {
-      const isFD = this.isCanFD.get(command.channelIndex) || false;
+    const isFD = this.isCanFD.get(command.channelIndex) || false;
 
-      for (let i = 0; i < command.repeatCount; i++) {
-        if (this.device) {
-          if (isFD) {
-            const frame: CanFDFrame = {
-              id: command.messageId,
-              len: command.data.length,
-              data: command.data,
-            };
-            this.device.transmitFD(channelHandle, frame);
-          } else {
-            const frame: CanFrame = {
-              id: command.messageId,
-              dlc: command.data.length,
-              data: command.data,
-            };
-            this.device.transmit(channelHandle, frame);
-          }
-        } else {
-          // 模拟模式：仅记录
-          this.log(`      [模拟] 发送第 ${i + 1}/${command.repeatCount} 帧`);
-        }
+    // 添加到发送队列
+    const queueItem: SendQueueItem = {
+      channelIndex: command.channelIndex,
+      messageId: command.messageId,
+      data: command.data,
+      intervalMs: command.intervalMs,
+      remainingCount: command.repeatCount,
+      lastSendTime: 0, // 立即开始发送
+      isFD,
+    };
 
-        // 发送间隔
-        if (i < command.repeatCount - 1 && command.intervalMs > 0) {
-          await this.delay(command.intervalMs);
-        }
-      }
+    this.addToSendQueue(queueItem);
 
-      return {
-        command: cmdStr,
-        success: true,
-        message: `成功发送 ${command.repeatCount} 帧`,
-        line: command.line,
-      };
-    } catch (error: any) {
-      return {
-        command: cmdStr,
-        success: false,
-        message: `发送失败: ${error.message}`,
-        line: command.line,
-      };
-    }
+    return {
+      command: cmdStr,
+      success: true,
+      message: `已加入发送队列: ${command.repeatCount}帧, 间隔${command.intervalMs}ms`,
+      line: command.line,
+    };
   }
 
   /**
@@ -620,31 +756,23 @@ export class TesterExecutor {
 
       // 等待接收匹配的报文
       while (Date.now() - startTime < command.timeoutMs) {
-        if (this.device) {
-          const frames = isFD ? this.device.receiveFD(channelHandle, 100, 10) : this.device.receive(channelHandle, 100, 10);
+        const frames = isFD
+          ? this.device.receiveFD(channelHandle, 100, 10)
+          : this.device.receive(channelHandle, 100, 10);
 
-          for (const frame of frames) {
-            if (frame.id === command.messageId) {
-              receivedFrame = frame;
-              break;
-            }
-          }
-
-          if (receivedFrame) {
+        for (const frame of frames) {
+          if (frame.id === command.messageId) {
+            receivedFrame = frame;
             break;
           }
-        } else {
-          // 模拟模式：生成模拟数据
-          await this.delay(50);
-          receivedFrame = {
-            id: command.messageId,
-            dlc: 8,
-            data: [0x50, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
-            timestamp: Date.now(),
-          };
-          this.log(`      [模拟] 接收到报文 ID=0x${command.messageId.toString(16).toUpperCase()}`);
+        }
+
+        if (receivedFrame) {
           break;
         }
+
+        // 短暂等待避免CPU占用过高
+        await this.delay(1);
       }
 
       if (!receivedFrame) {
@@ -707,18 +835,19 @@ export class TesterExecutor {
   }
 
   /**
-   * 执行 tdelay 命令（延时）
+   * 执行 tdelay 命令（延时后执行下一条命令）
    */
   private async executeTdelay(command: TdelayCommand): Promise<CommandResult> {
     const cmdStr = `tdelay ${command.delayMs}`;
     this.log(`    > ${cmdStr}`);
 
+    // 延时指定时间
     await this.delay(command.delayMs);
 
     return {
       command: cmdStr,
       success: true,
-      message: `延时 ${command.delayMs}ms`,
+      message: `延时 ${command.delayMs}ms 完成`,
       line: command.line,
     };
   }
