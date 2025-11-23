@@ -2,7 +2,7 @@
   "name": "tester",
   "displayName": "Tester",
   "description": "Tester语言支持插件，用于CAN总线通信的开发、测试和调试。",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "publisher": "林寒",
   "author": {
     "name": "林寒",
@@ -77,7 +77,8 @@
     "clean:native": "node-gyp clean",
     "copy:native": "node -e \"require('fs').copyFileSync('build/Release/zlgcan.node', 'src/zlgcan/lib/zlgcan.node')\"",
     "copy:native:debug": "node -e \"require('fs').copyFileSync('build/Debug/zlgcan.node', 'src/zlgcan/lib/zlgcan.node')\"",
-    "test:zlgcan": "npx ts-node test/zlgcan.test.ts"
+    "test:zlgcan": "npx ts-node test/zlgcan.test.ts",
+    "package:extension": "vsce package"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
