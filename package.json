@@ -72,9 +72,11 @@
     "check-types": "tsc --noEmit",
     "lint": "eslint src",
     "test": "vscode-test",
-    "build:native": "node-gyp rebuild",
-    "build:native:debug": "node-gyp rebuild --debug",
+    "build:native": "node-gyp rebuild && npm run copy:native",
+    "build:native:debug": "node-gyp rebuild --debug && npm run copy:native:debug",
     "clean:native": "node-gyp clean",
+    "copy:native": "node -e \"require('fs').copyFileSync('build/Release/zlgcan.node', 'src/zlgcan/lib/zlgcan.node')\"",
+    "copy:native:debug": "node -e \"require('fs').copyFileSync('build/Debug/zlgcan.node', 'src/zlgcan/lib/zlgcan.node')\"",
     "test:zlgcan": "npx ts-node test/zlgcan.test.ts"
   },
   "devDependencies": {

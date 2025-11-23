@@ -19,13 +19,7 @@
         "VCCLCompilerTool": {
           "ExceptionHandling": 1
         }
-      },
-      "copies": [
-        {
-          "destination": "<(module_root_dir)/src/zlgcan/lib",
-          "files": ["<(PRODUCT_DIR)/zlgcan.node"]
-        }
-      ]
+      }
     }
   ]
 }
