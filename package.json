@@ -78,6 +78,7 @@
     "copy:native": "node -e \"require('fs').copyFileSync('build/Release/zlgcan.node', 'src/zlgcan/lib/zlgcan.node')\"",
     "copy:native:debug": "node -e \"require('fs').copyFileSync('build/Debug/zlgcan.node', 'src/zlgcan/lib/zlgcan.node')\"",
     "test:zlgcan": "npx ts-node test/zlgcan.test.ts",
+    "test:zlgcan:loopback": "npx ts-node test/zlgcan.loopback.test.ts",
     "package:extension": "vsce package"
   },
   "devDependencies": {
