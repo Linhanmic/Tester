@@ -99,15 +99,62 @@ function testGetDeviceInfo(device: ZlgCanDevice): boolean {
 }
 
 /**
+ * 配置通道波特率和终端电阻（必须在 initCanChannel 之前调用）
+ */
+function configureChannel(device: ZlgCanDevice, channelIndex: number): boolean {
+    const ch = channelIndex.toString();
+
+    // 设置仲裁域波特率 (500kbps)
+    const abitResult = device.setValue(`${ch}/canfd_abit_baud_rate`, "500000");
+    if (abitResult === 0) {
+        console.log(`  警告: 通道${ch} 设置仲裁段波特率失败`);
+        return false;
+    }
+
+    // 设置数据域波特率 (2Mbps)
+    const dbitResult = device.setValue(`${ch}/canfd_dbit_baud_rate`, "2000000");
+    if (dbitResult === 0) {
+        console.log(`  警告: 通道${ch} 设置数据段波特率失败`);
+        return false;
+    }
+
+    // 使能终端电阻（两通道互连测试必需）
+    const resistResult = device.setValue(`${ch}/initenal_resistance`, "1");
+    if (resistResult === 0) {
+        console.log(`  警告: 通道${ch} 使能终端电阻失败`);
+        return false;
+    }
+
+    console.log(`  通道${ch} 配置成功: 500kbps/2Mbps, 终端电阻已使能`);
+    return true;
+}
+
+/**
  * 测试3: 初始化双通道
  */
 function testInitChannels(device: ZlgCanDevice): { ch0: number; ch1: number } | null {
     console.log('\n--- 测试3: 初始化双通道 ---');
     try {
+        // 先配置通道0的波特率和终端电阻
+        if (!configureChannel(device, 0)) {
+            logTest('配置通道0', false, '波特率或终端电阻设置失败');
+            return null;
+        }
+
+        // 初始化通道0
         const ch0 = device.initCanChannel(0, TEST_CONFIG.canfdConfig);
         const ch0Success = ch0 !== 0;
         logTest('初始化通道0', ch0Success, ch0Success ? `句柄: ${ch0}` : '初始化失败');
 
+        if (!ch0Success) return null;
+
+        // 先配置通道1的波特率和终端电阻
+        if (!configureChannel(device, 1)) {
+            logTest('配置通道1', false, '波特率或终端电阻设置失败');
+            return null;
+        }
+
+        // 初始化通道1
         const ch1 = device.initCanChannel(1, TEST_CONFIG.canfdConfig);
         const ch1Success = ch1 !== 0;
         logTest('初始化通道1', ch1Success, ch1Success ? `句柄: ${ch1}` : '初始化失败');
