@@ -7,7 +7,7 @@ import { ZlgCanDevice, DeviceType, CanType, CanFrame, ReceivedFrame, CanChannelC
 
 // 测试配置
 const TEST_CONFIG = {
-    deviceType: DeviceType.ZCAN_USBCAN2,  // 根据实际设备修改
+    deviceType: DeviceType.ZCAN_USBCANFD_200U,  // 根据实际设备修改
     deviceIndex: 0,
     channelIndex: 0,
     // CAN配置 (250Kbps)
