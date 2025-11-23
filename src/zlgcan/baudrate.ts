@@ -616,3 +616,327 @@ export function getTcanInitExamples(): string[] {
         'tcaninit 2,0,0,250,1000   // CANFD低速: 250kbps/1Mbps',
     ];
 }
+
+// ============================================================================
+// tcans 命令支持
+// ============================================================================
+
+/**
+ * tcans命令解析结果
+ */
+export interface TcansParams {
+    /** 项目通道索引（默认0） */
+    channelIndex: number;
+    /** CAN报文ID */
+    messageId: number;
+    /** 数据字节数组 */
+    dataBytes: number[];
+    /** 发送间隔(ms) */
+    intervalMs: number;
+    /** 发送次数 */
+    repeatCount: number;
+}
+
+/**
+ * 解析tcans命令
+ * 语法: tcans [channel_index,]message_id,data_bytes,interval_ms,repeat_count
+ * @param command tcans命令字符串
+ * @returns 解析结果，失败返回null
+ */
+export function parseTcansCommand(command: string): TcansParams | null {
+    const trimmed = command.trim();
+
+    // 移除注释
+    const commentIndex = trimmed.indexOf('//');
+    const cmdPart = commentIndex >= 0 ? trimmed.substring(0, commentIndex).trim() : trimmed;
+
+    // 匹配tcans命令
+    const match = cmdPart.match(/^tcans\s+(.+)$/i);
+    if (!match) {
+        return null;
+    }
+
+    const paramStr = match[1];
+
+    // 分割参数，但需要处理数据字节（用-分隔）
+    // 格式: [channel,]id,data,interval,count
+    // 例如: 0x123,01-02-03,100,5 或 1,0x123,01-02-03,100,5
+
+    // 先按逗号分割
+    const parts = paramStr.split(',').map(p => p.trim());
+
+    if (parts.length < 4 || parts.length > 5) {
+        return null;
+    }
+
+    let channelIndex = 0;
+    let messageIdStr: string;
+    let dataBytesStr: string;
+    let intervalStr: string;
+    let repeatStr: string;
+
+    if (parts.length === 5) {
+        // 包含通道参数
+        channelIndex = parseInt(parts[0], 10);
+        messageIdStr = parts[1];
+        dataBytesStr = parts[2];
+        intervalStr = parts[3];
+        repeatStr = parts[4];
+    } else {
+        // 不包含通道参数，默认通道0
+        messageIdStr = parts[0];
+        dataBytesStr = parts[1];
+        intervalStr = parts[2];
+        repeatStr = parts[3];
+    }
+
+    // 解析报文ID（支持十六进制和十进制）
+    const messageId = messageIdStr.toLowerCase().startsWith('0x')
+        ? parseInt(messageIdStr, 16)
+        : parseInt(messageIdStr, 10);
+
+    if (isNaN(messageId) || isNaN(channelIndex)) {
+        return null;
+    }
+
+    // 解析数据字节（支持 - 或空格分隔）
+    const dataBytes = parseDataBytes(dataBytesStr);
+    if (dataBytes === null) {
+        return null;
+    }
+
+    // 解析间隔和次数
+    const intervalMs = parseInt(intervalStr, 10);
+    const repeatCount = parseInt(repeatStr, 10);
+
+    if (isNaN(intervalMs) || isNaN(repeatCount)) {
+        return null;
+    }
+
+    return {
+        channelIndex,
+        messageId,
+        dataBytes,
+        intervalMs,
+        repeatCount,
+    };
+}
+
+/**
+ * 解析数据字节字符串
+ * 支持格式: "01-02-03" 或 "01 02 03" 或 "01-02 03-04"
+ * @param dataBytesStr 数据字节字符串
+ * @returns 字节数组，失败返回null
+ */
+export function parseDataBytes(dataBytesStr: string): number[] | null {
+    // 将-替换为空格，然后按空格分割
+    const normalized = dataBytesStr.replace(/-/g, ' ').trim();
+    const byteStrs = normalized.split(/\s+/);
+
+    const bytes: number[] = [];
+    for (const byteStr of byteStrs) {
+        if (byteStr.length === 0) continue;
+
+        // 解析十六进制字节
+        const byte = parseInt(byteStr, 16);
+        if (isNaN(byte) || byte < 0 || byte > 255) {
+            return null;
+        }
+        bytes.push(byte);
+    }
+
+    return bytes.length > 0 ? bytes : null;
+}
+
+/**
+ * 格式化数据字节为字符串
+ * @param bytes 字节数组
+ * @returns 格式化字符串
+ */
+export function formatDataBytes(bytes: number[]): string {
+    return bytes.map(b => b.toString(16).padStart(2, '0').toUpperCase()).join('-');
+}
+
+// ============================================================================
+// tcanr 命令支持
+// ============================================================================
+
+/**
+ * tcanr命令解析结果
+ */
+export interface TcanrParams {
+    /** 项目通道索引（默认0） */
+    channelIndex: number;
+    /** CAN报文ID */
+    messageId: number;
+    /** 位范围（字符串格式） */
+    bitRange: string;
+    /** 期望值（字符串格式，可能包含+分隔的多个值）或 'print' */
+    expectedValue: string;
+    /** 超时时间(ms)，如果是print则为undefined */
+    timeoutMs?: number;
+    /** 是否为输出模式 */
+    isPrint: boolean;
+}
+
+/**
+ * 解析tcanr命令
+ * 语法1: tcanr [channel_index,]message_id,bit_range,expected_value,timeout_ms
+ * 语法2: tcanr [channel_index,]message_id,bit_range,print
+ * @param command tcanr命令字符串
+ * @returns 解析结果，失败返回null
+ */
+export function parseTcanrCommand(command: string): TcanrParams | null {
+    const trimmed = command.trim();
+
+    // 移除注释
+    const commentIndex = trimmed.indexOf('//');
+    const cmdPart = commentIndex >= 0 ? trimmed.substring(0, commentIndex).trim() : trimmed;
+
+    // 匹配tcanr命令
+    const match = cmdPart.match(/^tcanr\s+(.+)$/i);
+    if (!match) {
+        return null;
+    }
+
+    const paramStr = match[1];
+    const parts = paramStr.split(',').map(p => p.trim());
+
+    if (parts.length < 4 || parts.length > 5) {
+        return null;
+    }
+
+    let channelIndex = 0;
+    let messageIdStr: string;
+    let bitRange: string;
+    let expectedValueOrPrint: string;
+    let timeoutStr: string | undefined;
+
+    // 判断是否包含通道参数
+    // 如果第一个参数是纯数字且不是十六进制，可能是通道号
+    const firstIsChannel = parts.length === 5 ||
+        (parts.length === 4 && parts[0].match(/^\d+$/) && !parts[1].toLowerCase().startsWith('0x'));
+
+    if (parts.length === 5 || (firstIsChannel && parts.length === 4 && parts[3].toLowerCase() !== 'print')) {
+        if (parts.length === 5) {
+            channelIndex = parseInt(parts[0], 10);
+            messageIdStr = parts[1];
+            bitRange = parts[2];
+            expectedValueOrPrint = parts[3];
+            timeoutStr = parts[4];
+        } else {
+            // 4个参数，第一个是通道
+            channelIndex = parseInt(parts[0], 10);
+            messageIdStr = parts[1];
+            bitRange = parts[2];
+            expectedValueOrPrint = parts[3];
+        }
+    } else {
+        // 不包含通道参数
+        messageIdStr = parts[0];
+        bitRange = parts[1];
+        expectedValueOrPrint = parts[2];
+        if (parts.length === 4) {
+            timeoutStr = parts[3];
+        }
+    }
+
+    // 解析报文ID
+    const messageId = messageIdStr.toLowerCase().startsWith('0x')
+        ? parseInt(messageIdStr, 16)
+        : parseInt(messageIdStr, 10);
+
+    if (isNaN(messageId)) {
+        return null;
+    }
+
+    const isPrint = expectedValueOrPrint.toLowerCase() === 'print';
+
+    let timeoutMs: number | undefined;
+    if (!isPrint && timeoutStr) {
+        timeoutMs = parseInt(timeoutStr, 10);
+        if (isNaN(timeoutMs)) {
+            return null;
+        }
+    }
+
+    return {
+        channelIndex,
+        messageId,
+        bitRange,
+        expectedValue: expectedValueOrPrint,
+        timeoutMs,
+        isPrint,
+    };
+}
+
+// ============================================================================
+// tdelay 命令支持
+// ============================================================================
+
+/**
+ * tdelay命令解析结果
+ */
+export interface TdelayParams {
+    /** 延时时间(ms) */
+    delayMs: number;
+}
+
+/**
+ * 解析tdelay命令
+ * @param command tdelay命令字符串
+ * @returns 解析结果，失败返回null
+ */
+export function parseTdelayCommand(command: string): TdelayParams | null {
+    const trimmed = command.trim();
+
+    // 移除注释
+    const commentIndex = trimmed.indexOf('//');
+    const cmdPart = commentIndex >= 0 ? trimmed.substring(0, commentIndex).trim() : trimmed;
+
+    const match = cmdPart.match(/^tdelay\s+(\d+)$/i);
+    if (!match) {
+        return null;
+    }
+
+    const delayMs = parseInt(match[1], 10);
+    if (isNaN(delayMs)) {
+        return null;
+    }
+
+    return { delayMs };
+}
+
+/**
+ * 测试命令类型
+ */
+export type TestCommand =
+    | { type: 'tcans'; params: TcansParams }
+    | { type: 'tcanr'; params: TcanrParams }
+    | { type: 'tdelay'; params: TdelayParams };
+
+/**
+ * 解析测试命令
+ * @param command 命令字符串
+ * @returns 解析结果，失败返回null
+ */
+export function parseTestCommand(command: string): TestCommand | null {
+    const trimmed = command.trim().toLowerCase();
+
+    if (trimmed.startsWith('tcans')) {
+        const params = parseTcansCommand(command);
+        return params ? { type: 'tcans', params } : null;
+    }
+
+    if (trimmed.startsWith('tcanr')) {
+        const params = parseTcanrCommand(command);
+        return params ? { type: 'tcanr', params } : null;
+    }
+
+    if (trimmed.startsWith('tdelay')) {
+        const params = parseTdelayCommand(command);
+        return params ? { type: 'tdelay', params } : null;
+    }
+
+    return null;
+}
