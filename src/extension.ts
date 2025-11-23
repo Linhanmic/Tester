@@ -5,6 +5,7 @@ import { TesterDocumentSymbolProvider } from "./symbolProvider";
 import { TesterHoverProvider } from "./hoverProvider";
 import { TesterCodeLensProvider } from "./codeLensProvider";
 import { TesterFormattingProvider } from "./formatting";
+import { TesterExecutor } from "./executor";
 
 // 全局诊断集合
 let diagnosticCollection: vscode.DiagnosticCollection;
@@ -55,6 +56,42 @@ export function activate(context: vscode.ExtensionContext) {
       new TesterFormattingProvider()
     )
   );
+
+  // ========== CodeLens 命令注册 ==========
+
+  // 创建执行器实例
+  const executor = new TesterExecutor();
+
+  // 注册运行全部测试命令
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "tester.runAllTests",
+      async (documentUri: vscode.Uri) => {
+        await executor.runAllTests(documentUri);
+      }
+    )
+  );
+
+  // 注册运行测试用例集命令
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "tester.runTestSuiteByLine",
+      async (documentUri: vscode.Uri, lineNumber: number, suiteName: string) => {
+        await executor.runTestSuiteByLine(documentUri, lineNumber, suiteName);
+      }
+    )
+  );
+
+  // 注册运行单个测试用例命令
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "tester.runTestCaseByLine",
+      async (documentUri: vscode.Uri, lineNumber: number, caseName: string) => {
+        await executor.runTestCaseByLine(documentUri, lineNumber, caseName);
+      }
+    )
+  );
+
   // ========== 文档事件监听 ==========
 
   // 文档打开时验证

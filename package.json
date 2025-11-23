@@ -54,8 +54,19 @@
     ],
     "commands": [
       {
-        "command": "tester.helloWorld",
-        "title": "Hello World"
+        "command": "tester.runAllTests",
+        "title": "Tester: 运行全部测试",
+        "icon": "$(play)"
+      },
+      {
+        "command": "tester.runTestSuiteByLine",
+        "title": "Tester: 运行测试用例集",
+        "icon": "$(play)"
+      },
+      {
+        "command": "tester.runTestCaseByLine",
+        "title": "Tester: 运行测试用例",
+        "icon": "$(play)"
       }
     ]
   },
