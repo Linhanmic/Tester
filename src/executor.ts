@@ -4,9 +4,10 @@
  *
  * 特性：
  * - 使用真实CAN设备（不支持模拟模式）
- * - tcans命令使用发送队列，后台持续发送
+ * - 使用ZLG设备硬件队列发送功能
+ * - tcans命令将报文添加到设备队列后立即执行下一条指令
  * - tdelay命令延时后执行下一条命令
- * - 每个测试用例开始时清除发送队列
+ * - 每个测试用例开始时清除设备发送队列
  */
 
 import * as vscode from "vscode";
@@ -29,14 +30,21 @@ interface CanFrame {
   dlc: number;
   data: number[];
   transmitType?: number;
+  // 队列发送相关字段
+  __pad?: number; // Bit7 为 TX_DELAY_SEND_FLAG
+  __res0?: number; // 帧间隔低8位
+  __res1?: number; // 帧间隔高8位
 }
 
 interface CanFDFrame {
   id: number;
   len: number;
   data: number[];
-  flags?: number;
+  flags?: number; // Bit7 为 TX_DELAY_SEND_FLAG
   transmitType?: number;
+  // 队列发送相关字段
+  __res0?: number; // 帧间隔低8位
+  __res1?: number; // 帧间隔高8位
 }
 
 interface ReceivedFrame {
@@ -67,17 +75,6 @@ interface CanChannelConfig {
   dbitTiming?: number;
   brp?: number;
   pad?: number;
-}
-
-/** 发送队列项 */
-interface SendQueueItem {
-  channelIndex: number;
-  messageId: number;
-  data: number[];
-  intervalMs: number;
-  remainingCount: number;
-  lastSendTime: number;
-  isFD: boolean;
 }
 
 /** 执行结果 */
@@ -120,6 +117,9 @@ export interface AllTestsResult {
   duration: number;
 }
 
+// TX_DELAY_SEND_FLAG 位掩码 (Bit7)
+const TX_DELAY_SEND_FLAG = 0x80;
+
 /**
  * Tester脚本执行器
  */
@@ -130,11 +130,7 @@ export class TesterExecutor {
   private channelHandles: Map<number, number> = new Map(); // 项目通道索引 -> 设备通道句柄
   private channelConfigs: ChannelConfig[] = [];
   private isCanFD: Map<number, boolean> = new Map(); // 项目通道索引 -> 是否为CAN-FD
-
-  // 发送队列相关
-  private sendQueue: SendQueueItem[] = [];
-  private sendQueueRunning: boolean = false;
-  private sendQueueTimer: ReturnType<typeof setInterval> | null = null;
+  private channelIndexMap: Map<number, number> = new Map(); // 项目通道索引 -> 设备通道索引
 
   // ZLG CAN 模块引用
   private zlgcanModule: any = null;
@@ -204,8 +200,7 @@ export class TesterExecutor {
         result.totalFailed += suiteResult.failed;
       }
     } finally {
-      // 停止发送队列并关闭设备
-      this.stopSendQueue();
+      // 关闭设备
       await this.closeDevice();
     }
 
@@ -291,7 +286,6 @@ export class TesterExecutor {
     try {
       result = await this.executeTestSuite(suite);
     } finally {
-      this.stopSendQueue();
       await this.closeDevice();
     }
 
@@ -370,7 +364,6 @@ export class TesterExecutor {
     try {
       result = await this.executeTestCase(testCase);
     } finally {
-      this.stopSendQueue();
       await this.closeDevice();
     }
 
@@ -398,6 +391,7 @@ export class TesterExecutor {
     this.channelConfigs = config.channels;
     this.channelHandles.clear();
     this.isCanFD.clear();
+    this.channelIndexMap.clear();
 
     try {
       // 动态加载ZlgCanDevice
@@ -436,6 +430,7 @@ export class TesterExecutor {
         for (const channel of channels) {
           const isFD = channel.dataBaudrate !== undefined;
           this.isCanFD.set(channel.projectChannelIndex, isFD);
+          this.channelIndexMap.set(channel.projectChannelIndex, channel.channelIndex);
 
           const channelConfig: CanChannelConfig = {
             canType: isFD ? CanType.TYPE_CANFD : CanType.TYPE_CAN,
@@ -462,6 +457,14 @@ export class TesterExecutor {
           }
 
           this.channelHandles.set(channel.projectChannelIndex, handle);
+
+          // 设置为队列发送模式
+          const sendModeResult = this.device.setValue(`${channel.channelIndex}/set_send_mode`, "1");
+          if (sendModeResult !== 1) {
+            this.log(`    警告: 无法设置通道 ${channel.channelIndex} 为队列发送模式`);
+          } else {
+            this.log(`    已设置为队列发送模式`);
+          }
         }
       }
 
@@ -491,111 +494,27 @@ export class TesterExecutor {
     this.channelHandles.clear();
   }
 
-  // ========== 发送队列管理 ==========
-
   /**
-   * 清除发送队列
+   * 清空设备发送队列
    */
-  private clearSendQueue(): void {
-    this.sendQueue = [];
-    this.log("    [队列] 发送队列已清除");
-  }
-
-  /**
-   * 添加到发送队列
-   */
-  private addToSendQueue(item: SendQueueItem): void {
-    this.sendQueue.push(item);
-    this.log(`    [队列] 添加发送任务: ID=0x${item.messageId.toString(16).toUpperCase()}, 间隔=${item.intervalMs}ms, 次数=${item.remainingCount}`);
-
-    // 启动发送队列处理器
-    if (!this.sendQueueRunning) {
-      this.startSendQueueProcessor();
-    }
-  }
-
-  /**
-   * 启动发送队列处理器
-   */
-  private startSendQueueProcessor(): void {
-    if (this.sendQueueRunning) {
-      return;
-    }
-
-    this.sendQueueRunning = true;
-    this.sendQueueTimer = setInterval(() => {
-      this.processSendQueue();
-    }, 1); // 1ms 检查一次
-
-    this.log("    [队列] 发送队列处理器已启动");
-  }
-
-  /**
-   * 停止发送队列处理器
-   */
-  private stopSendQueue(): void {
-    if (this.sendQueueTimer) {
-      clearInterval(this.sendQueueTimer);
-      this.sendQueueTimer = null;
-    }
-    this.sendQueueRunning = false;
-    this.sendQueue = [];
-    this.log("    [队列] 发送队列处理器已停止");
-  }
-
-  /**
-   * 处理发送队列
-   */
-  private processSendQueue(): void {
-    if (!this.device || this.sendQueue.length === 0) {
-      return;
-    }
-
-    const now = Date.now();
-    const itemsToRemove: number[] = [];
-
-    for (let i = 0; i < this.sendQueue.length; i++) {
-      const item = this.sendQueue[i];
-
-      // 检查是否到达发送时间
-      if (now - item.lastSendTime >= item.intervalMs) {
-        // 发送报文
-        const channelHandle = this.channelHandles.get(item.channelIndex);
-        if (channelHandle !== undefined) {
-          try {
-            if (item.isFD) {
-              const frame: CanFDFrame = {
-                id: item.messageId,
-                len: item.data.length,
-                data: item.data,
-              };
-              this.device.transmitFD(channelHandle, frame);
-            } else {
-              const frame: CanFrame = {
-                id: item.messageId,
-                dlc: item.data.length,
-                data: item.data,
-              };
-              this.device.transmit(channelHandle, frame);
-            }
-          } catch (error: any) {
-            this.logError(`发送队列发送失败: ${error.message}`);
-          }
-        }
-
-        item.lastSendTime = now;
-        item.remainingCount--;
-
-        // 检查是否完成
-        if (item.remainingCount <= 0) {
-          itemsToRemove.push(i);
-        }
+  private clearDeviceSendQueue(projectChannelIndex: number): void {
+    const deviceChannelIndex = this.channelIndexMap.get(projectChannelIndex);
+    if (deviceChannelIndex !== undefined && this.device) {
+      try {
+        this.device.setValue(`${deviceChannelIndex}/clear_delay_send_queue`, "0");
+        this.log(`    [队列] 已清空通道 ${projectChannelIndex} 的发送队列`);
+      } catch (error: any) {
+        this.logError(`清空发送队列失败: ${error.message}`);
       }
     }
+  }
 
-    // 移除已完成的项（从后往前移除以避免索引问题）
-    for (let i = itemsToRemove.length - 1; i >= 0; i--) {
-      this.sendQueue.splice(itemsToRemove[i], 1);
+  /**
+   * 清空所有通道的发送队列
+   */
+  private clearAllSendQueues(): void {
+    for (const projectChannelIndex of this.channelIndexMap.keys()) {
+      this.clearDeviceSendQueue(projectChannelIndex);
     }
   }
 
@@ -640,8 +559,8 @@ export class TesterExecutor {
     const seqStr = testCase.sequenceNumber !== undefined ? `[${testCase.sequenceNumber}] ` : "";
     this.log(`\n  ${seqStr}${testCase.name}`);
 
-    // 清除发送队列，避免上一个测试用例的干扰
-    this.clearSendQueue();
+    // 清除所有通道的发送队列，避免上一个测试用例的干扰
+    this.clearAllSendQueues();
 
     const result: TestCaseResult = {
       name: testCase.name,
@@ -657,9 +576,6 @@ export class TesterExecutor {
         result.success = false;
       }
     }
-
-    // 测试用例结束时停止该用例的发送队列
-    this.clearSendQueue();
 
     result.duration = Date.now() - startTime;
     this.log(`    结果: ${result.success ? "PASS" : "FAIL"} (${result.duration}ms)`);
@@ -688,7 +604,9 @@ export class TesterExecutor {
   }
 
   /**
-   * 执行 tcans 命令（加入发送队列）
+   * 执行 tcans 命令（添加到设备发送队列）
+   * 使用ZLG设备的队列发送功能，将报文批量添加到设备队列
+   * 设备会按照预设的帧间隔自动发送
    */
   private async executeTcans(command: TcansCommand): Promise<CommandResult> {
     const dataStr = command.data.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join("-");
@@ -708,25 +626,71 @@ export class TesterExecutor {
 
     const isFD = this.isCanFD.get(command.channelIndex) || false;
 
-    // 添加到发送队列
-    const queueItem: SendQueueItem = {
-      channelIndex: command.channelIndex,
-      messageId: command.messageId,
-      data: command.data,
-      intervalMs: command.intervalMs,
-      remainingCount: command.repeatCount,
-      lastSendTime: 0, // 立即开始发送
-      isFD,
-    };
+    try {
+      // 准备要发送的帧数组
+      // 帧间隔单位ms，需要填入res0(低8位)和res1(高8位)
+      const intervalLow = command.intervalMs & 0xFF;
+      const intervalHigh = (command.intervalMs >> 8) & 0xFF;
 
-    this.addToSendQueue(queueItem);
+      let totalSent = 0;
 
-    return {
-      command: cmdStr,
-      success: true,
-      message: `已加入发送队列: ${command.repeatCount}帧, 间隔${command.intervalMs}ms`,
-      line: command.line,
-    };
+      if (isFD) {
+        // CANFD帧: TX_DELAY_SEND_FLAG 在 flags 的 Bit7
+        const frames: CanFDFrame[] = [];
+        for (let i = 0; i < command.repeatCount; i++) {
+          frames.push({
+            id: command.messageId,
+            len: command.data.length,
+            data: [...command.data],
+            flags: TX_DELAY_SEND_FLAG, // Bit7 = 1 启用队列发送
+            __res0: intervalLow,
+            __res1: intervalHigh,
+          });
+        }
+        // 批量发送到设备队列
+        totalSent = this.device.transmitFD(channelHandle, frames);
+      } else {
+        // CAN帧: TX_DELAY_SEND_FLAG 在 __pad 的 Bit7
+        const frames: CanFrame[] = [];
+        for (let i = 0; i < command.repeatCount; i++) {
+          frames.push({
+            id: command.messageId,
+            dlc: command.data.length,
+            data: [...command.data],
+            __pad: TX_DELAY_SEND_FLAG, // Bit7 = 1 启用队列发送
+            __res0: intervalLow,
+            __res1: intervalHigh,
+          });
+        }
+        // 批量发送到设备队列
+        totalSent = this.device.transmit(channelHandle, frames);
+      }
+
+      this.log(`    [队列] 已添加 ${totalSent}/${command.repeatCount} 帧到设备发送队列, 间隔=${command.intervalMs}ms`);
+
+      if (totalSent < command.repeatCount) {
+        return {
+          command: cmdStr,
+          success: false,
+          message: `仅 ${totalSent}/${command.repeatCount} 帧添加到队列`,
+          line: command.line,
+        };
+      }
+
+      return {
+        command: cmdStr,
+        success: true,
+        message: `已添加 ${totalSent} 帧到设备发送队列`,
+        line: command.line,
+      };
+    } catch (error: any) {
+      return {
+        command: cmdStr,
+        success: false,
+        message: `发送失败: ${error.message}`,
+        line: command.line,
+      };
+    }
   }
 
   /**
