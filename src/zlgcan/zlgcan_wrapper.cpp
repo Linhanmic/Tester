@@ -41,6 +41,8 @@ public:
             InstanceMethod("openDevice", &ZlgCanDevice::OpenDevice),
             InstanceMethod("closeDevice", &ZlgCanDevice::CloseDevice),
             InstanceMethod("getDeviceInfo", &ZlgCanDevice::GetDeviceInfo),
+            InstanceMethod("setValue", &ZlgCanDevice::SetValue),
+            InstanceMethod("getValue", &ZlgCanDevice::GetValue),
             InstanceMethod("initCanChannel", &ZlgCanDevice::InitCanChannel),
             InstanceMethod("startCanChannel", &ZlgCanDevice::StartCanChannel),
             InstanceMethod("transmit", &ZlgCanDevice::Transmit),
@@ -142,6 +144,51 @@ private:
         result.Set("hardwareType", Napi::String::New(env, hardwareType));
 
         return result;
+    }
+
+    Napi::Value SetValue(const Napi::CallbackInfo& info) {
+        Napi::Env env = info.Env();
+
+        if (info.Length() < 2) {
+            Napi::TypeError::New(env, "Expected path and value").ThrowAsJavaScriptException();
+            return env.Null();
+        }
+
+        if (deviceHandle == INVALID_DEVICE_HANDLE) {
+            Napi::Error::New(env, "Device not opened").ThrowAsJavaScriptException();
+            return env.Null();
+        }
+
+        std::string path = info[0].As<Napi::String>().Utf8Value();
+        std::string value = info[1].As<Napi::String>().Utf8Value();
+
+        UINT result = ZCAN_SetValue(deviceHandle, path.c_str(), value.c_str());
+
+        return Napi::Number::New(env, result);
+    }
+
+    Napi::Value GetValue(const Napi::CallbackInfo& info) {
+        Napi::Env env = info.Env();
+
+        if (info.Length() < 1) {
+            Napi::TypeError::New(env, "Expected path").ThrowAsJavaScriptException();
+            return env.Null();
+        }
+
+        if (deviceHandle == INVALID_DEVICE_HANDLE) {
+            Napi::Error::New(env, "Device not opened").ThrowAsJavaScriptException();
+            return env.Null();
+        }
+
+        std::string path = info[0].As<Napi::String>().Utf8Value();
+
+        const void* result = ZCAN_GetValue(deviceHandle, path.c_str());
+        if (result == nullptr) {
+            return env.Null();
+        }
+
+        // 返回字符串结果
+        return Napi::String::New(env, static_cast<const char*>(result));
     }
 
     Napi::Value InitCanChannel(const Napi::CallbackInfo& info) {

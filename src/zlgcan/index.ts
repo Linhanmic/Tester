@@ -226,6 +226,25 @@ export class ZlgCanDevice {
     }
 
     /**
+     * 设置设备属性值
+     * @param path 属性路径
+     * @param value 属性值
+     * @returns 设置结果，1表示成功，0表示失败
+     */
+    setValue(path: string, value: string): number {
+        return this.device.setValue(path, value);
+    }
+
+    /**
+     * 获取设备属性值
+     * @param path 属性路径
+     * @returns 属性值字符串，失败返回null
+     */
+    getValue(path: string): string | null {
+        return this.device.getValue(path);
+    }
+
+    /**
      * 初始化CAN通道
      * @param channelIndex 通道索引
      * @param config 通道配置
