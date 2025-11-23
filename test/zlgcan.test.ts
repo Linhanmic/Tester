@@ -12,12 +12,13 @@ const TEST_CONFIG = {
     deviceType: DeviceType.ZCAN_USBCANFD_200U,
     deviceIndex: 0,
     // CANFD配置
+    // 注意：USBCANFD-200U的波特率通过ZCAN_SetValue设置，而非abitTiming/dbitTiming
     canfdConfig: {
         canType: CanType.TYPE_CANFD,
         accCode: 0,
         accMask: 0xFFFFFFFF,
-        abitTiming: 0x00016D01,
-        dbitTiming: 0x00016D01,
+        abitTiming: 0,  // USBCANFD-200U不使用此字段，通过SetValue设置波特率
+        dbitTiming: 0,  // USBCANFD-200U不使用此字段，通过SetValue设置波特率
         brp: 0,
         filter: 0,
         mode: 0,
@@ -99,11 +100,26 @@ function testGetDeviceInfo(device: ZlgCanDevice): boolean {
 }
 
 /**
- * 测试3: 初始化双通道
+ * 测试3: 配置波特率并初始化双通道
+ * 注意：USBCANFD-200U等新型设备必须通过ZCAN_SetValue设置波特率
  */
 function testInitChannels(device: ZlgCanDevice): { ch0: number; ch1: number } | null {
     console.log('\n--- 测试3: 初始化双通道 ---');
     try {
+        // USBCANFD-200U 需要通过 SetValue 配置波特率
+        // 波特率路径格式: "{channel}/canfd_abit_baud_rate" 和 "{channel}/canfd_dbit_baud_rate"
+        console.log('  配置通道0波特率...');
+        const setBaud0Abit = device.setValue("0/canfd_abit_baud_rate", "500000");  // 仲裁域 500kbps
+        const setBaud0Dbit = device.setValue("0/canfd_dbit_baud_rate", "2000000"); // 数据域 2Mbps
+        console.log(`    仲裁域波特率设置: ${setBaud0Abit === 1 ? '成功' : '失败'}`);
+        console.log(`    数据域波特率设置: ${setBaud0Dbit === 1 ? '成功' : '失败'}`);
+
+        console.log('  配置通道1波特率...');
+        const setBaud1Abit = device.setValue("1/canfd_abit_baud_rate", "500000");
+        const setBaud1Dbit = device.setValue("1/canfd_dbit_baud_rate", "2000000");
+        console.log(`    仲裁域波特率设置: ${setBaud1Abit === 1 ? '成功' : '失败'}`);
+        console.log(`    数据域波特率设置: ${setBaud1Dbit === 1 ? '成功' : '失败'}`);
+
         const ch0 = device.initCanChannel(0, TEST_CONFIG.canfdConfig);
         const ch0Success = ch0 !== 0;
         logTest('初始化通道0', ch0Success, ch0Success ? `句柄: ${ch0}` : '初始化失败');
