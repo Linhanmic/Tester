@@ -44,7 +44,9 @@ public:
             InstanceMethod("initCanChannel", &ZlgCanDevice::InitCanChannel),
             InstanceMethod("startCanChannel", &ZlgCanDevice::StartCanChannel),
             InstanceMethod("transmit", &ZlgCanDevice::Transmit),
+            InstanceMethod("transmitFD", &ZlgCanDevice::TransmitFD),
             InstanceMethod("receive", &ZlgCanDevice::Receive),
+            InstanceMethod("receiveFD", &ZlgCanDevice::ReceiveFD),
             InstanceMethod("setReceiveCallback", &ZlgCanDevice::SetReceiveCallback),
             InstanceMethod("clearReceiveCallback", &ZlgCanDevice::ClearReceiveCallback)
         });
@@ -242,6 +244,47 @@ private:
         return Napi::Number::New(env, result);
     }
 
+    Napi::Value TransmitFD(const Napi::CallbackInfo& info) {
+        Napi::Env env = info.Env();
+
+        if (info.Length() < 2) {
+            Napi::TypeError::New(env, "Expected channelHandle and frame").ThrowAsJavaScriptException();
+            return env.Null();
+        }
+
+        CHANNEL_HANDLE channelHandle = reinterpret_cast<CHANNEL_HANDLE>(
+            static_cast<uintptr_t>(info[0].As<Napi::Number>().DoubleValue())
+        );
+        Napi::Object frameObj = info[1].As<Napi::Object>();
+
+        ZCAN_TransmitFD_Data transmitData = {0};
+        canfd_frame& frame = transmitData.frame;
+
+        // 设置帧ID
+        frame.can_id = frameObj.Get("id").As<Napi::Number>().Uint32Value();
+
+        // 设置数据长度
+        frame.len = frameObj.Get("len").As<Napi::Number>().Uint32Value();
+
+        // 设置标志 (BRS等)
+        if (frameObj.Has("flags")) {
+            frame.flags = frameObj.Get("flags").As<Napi::Number>().Uint32Value();
+        }
+
+        // 设置数据
+        Napi::Array dataArray = frameObj.Get("data").As<Napi::Array>();
+        for (uint32_t i = 0; i < dataArray.Length() && i < 64; i++) {
+            frame.data[i] = dataArray.Get(i).As<Napi::Number>().Uint32Value();
+        }
+
+        // 设置传输类型
+        transmitData.transmit_type = frameObj.Get("transmitType").As<Napi::Number>().Uint32Value();
+
+        UINT result = ZCAN_TransmitFD(channelHandle, &transmitData, 1);
+
+        return Napi::Number::New(env, result);
+    }
+
     Napi::Value Receive(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
 
@@ -274,6 +317,49 @@ private:
 
             Napi::Array dataArray = Napi::Array::New(env, 8);
             for (int j = 0; j < 8; j++) {
+                dataArray.Set(j, Napi::Number::New(env, receiveBuffer[i].frame.data[j]));
+            }
+            frameObj.Set("data", dataArray);
+
+            resultArray.Set(i, frameObj);
+        }
+
+        return resultArray;
+    }
+
+    Napi::Value ReceiveFD(const Napi::CallbackInfo& info) {
+        Napi::Env env = info.Env();
+
+        if (info.Length() < 2) {
+            Napi::TypeError::New(env, "Expected channelHandle and count").ThrowAsJavaScriptException();
+            return env.Null();
+        }
+
+        CHANNEL_HANDLE channelHandle = reinterpret_cast<CHANNEL_HANDLE>(
+            static_cast<uintptr_t>(info[0].As<Napi::Number>().DoubleValue())
+        );
+        uint32_t count = info[1].As<Napi::Number>().Uint32Value();
+        int32_t waitTime = -1;
+
+        if (info.Length() > 2) {
+            waitTime = info[2].As<Napi::Number>().Int32Value();
+        }
+
+        std::vector<ZCAN_ReceiveFD_Data> receiveBuffer(count);
+        UINT receivedCount = ZCAN_ReceiveFD(channelHandle, receiveBuffer.data(), count, waitTime);
+
+        Napi::Array resultArray = Napi::Array::New(env, receivedCount);
+
+        for (UINT i = 0; i < receivedCount; i++) {
+            Napi::Object frameObj = Napi::Object::New(env);
+
+            frameObj.Set("id", Napi::Number::New(env, receiveBuffer[i].frame.can_id));
+            frameObj.Set("len", Napi::Number::New(env, receiveBuffer[i].frame.len));
+            frameObj.Set("flags", Napi::Number::New(env, receiveBuffer[i].frame.flags));
+            frameObj.Set("timestamp", Napi::Number::New(env, receiveBuffer[i].timestamp));
+
+            Napi::Array dataArray = Napi::Array::New(env, 64);
+            for (int j = 0; j < 64; j++) {
                 dataArray.Set(j, Napi::Number::New(env, receiveBuffer[i].frame.data[j]));
             }
             frameObj.Set("data", dataArray);

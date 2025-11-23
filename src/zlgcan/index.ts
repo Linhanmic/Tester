@@ -130,6 +130,15 @@ export interface CanFrame {
     transmitType?: number;
 }
 
+// CANFD帧接口
+export interface CanFDFrame {
+    id: number;
+    len: number;
+    data: number[];
+    flags?: number;
+    transmitType?: number;
+}
+
 // 接收帧接口
 export interface ReceivedFrame {
     id: number;
@@ -137,6 +146,18 @@ export interface ReceivedFrame {
     data: number[];
     timestamp: number;
 }
+
+// CANFD接收帧接口
+export interface ReceivedFDFrame {
+    id: number;
+    len: number;
+    data: number[];
+    flags: number;
+    timestamp: number;
+}
+
+// CANFD接收回调函数类型
+export type ReceiveFDCallback = (frames: ReceivedFDFrame[]) => void;
 
 // CAN通道配置接口
 export interface CanChannelConfig {
@@ -251,6 +272,22 @@ export class ZlgCanDevice {
     }
 
     /**
+     * 发送CANFD帧
+     * @param channelHandle 通道句柄
+     * @param frame CANFD帧
+     */
+    transmitFD(channelHandle: number, frame: CanFDFrame): number {
+        const fullFrame = {
+            id: frame.id,
+            len: frame.len,
+            data: frame.data,
+            flags: frame.flags ?? 0,
+            transmitType: frame.transmitType ?? 0,
+        };
+        return this.device.transmitFD(channelHandle, fullFrame);
+    }
+
+    /**
      * 接收CAN帧
      * @param channelHandle 通道句柄
      * @param count 最大接收数量
@@ -258,6 +295,16 @@ export class ZlgCanDevice {
      */
     receive(channelHandle: number, count: number, waitTime: number = -1): ReceivedFrame[] {
         return this.device.receive(channelHandle, count, waitTime);
+    }
+
+    /**
+     * 接收CANFD帧
+     * @param channelHandle 通道句柄
+     * @param count 最大接收数量
+     * @param waitTime 等待时间（毫秒），-1表示阻塞等待
+     */
+    receiveFD(channelHandle: number, count: number, waitTime: number = -1): ReceivedFDFrame[] {
+        return this.device.receiveFD(channelHandle, count, waitTime);
     }
 
     /**
