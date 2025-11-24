@@ -77,11 +77,20 @@ export interface BitRange {
 /** 测试命令联合类型 */
 export type TestCommand = TcansCommand | TcanrCommand | TdelayCommand;
 
+/** 内嵌校验条件（从测试用例名称中解析） */
+export interface EmbeddedVerification {
+  channelIndex: number;
+  messageId: number;
+  bitRanges: BitRange[];
+  expectedValue: number;
+}
+
 /** 测试用例 */
 export interface TestCase {
   sequenceNumber?: number;
   name: string;
   commands: TestCommand[];
+  embeddedVerifications: EmbeddedVerification[]; // 从名称中解析的内嵌校验条件
   startLine: number;
   endLine: number;
 }
@@ -380,6 +389,9 @@ export class TesterParser {
       name = noSeqMatch[1].trim();
     }
 
+    // 解析测试用例名称中的内嵌校验条件
+    const embeddedVerifications = this.parseEmbeddedVerifications(name);
+
     this.currentLine++;
 
     const commands: TestCommand[] = [];
@@ -390,7 +402,7 @@ export class TesterParser {
       if (currentLine === "tend") {
         const endLine = this.currentLine;
         this.currentLine++;
-        return { sequenceNumber, name, commands, startLine, endLine };
+        return { sequenceNumber, name, commands, embeddedVerifications, startLine, endLine };
       }
 
       // 解析测试命令
@@ -403,7 +415,107 @@ export class TesterParser {
     }
 
     this.addError(`测试用例 "${name}" 缺少结束标记 tend`);
-    return { sequenceNumber, name, commands, startLine, endLine: this.currentLine };
+    return { sequenceNumber, name, commands, embeddedVerifications, startLine, endLine: this.currentLine };
+  }
+
+  /**
+   * 解析测试用例名称中的内嵌校验条件
+   * 支持格式: (CAN_ID,BitRange=ExpectedValue) 或 (ChannelIndex,CAN_ID,BitRange=ExpectedValue)
+   * 例如: (0x261,1.0-2.1=0x12A) 或 (1,0x261,1.0-2.1=0x12A)
+   */
+  private parseEmbeddedVerifications(name: string): EmbeddedVerification[] {
+    const verifications: EmbeddedVerification[] = [];
+
+    // 匹配括号内的校验条件: (...)
+    const pattern = /\(([^)]+)\)/g;
+    let match;
+
+    while ((match = pattern.exec(name)) !== null) {
+      const content = match[1].trim();
+      const verification = this.parseSingleEmbeddedVerification(content);
+      if (verification) {
+        verifications.push(verification);
+      }
+    }
+
+    return verifications;
+  }
+
+  /**
+   * 解析单个内嵌校验条件
+   * 格式: CAN_ID,BitRange=ExpectedValue 或 ChannelIndex,CAN_ID,BitRange=ExpectedValue
+   */
+  private parseSingleEmbeddedVerification(content: string): EmbeddedVerification | null {
+    // 查找等号位置来分离期望值
+    const equalIndex = content.lastIndexOf("=");
+    if (equalIndex === -1) {
+      return null; // 没有等号，不是校验条件
+    }
+
+    const beforeEqual = content.substring(0, equalIndex).trim();
+    const expectedValueStr = content.substring(equalIndex + 1).trim();
+
+    // 解析期望值
+    const expectedValue = this.parseHexValue(expectedValueStr);
+    if (expectedValue === null) {
+      return null;
+    }
+
+    // 分割等号前的部分
+    const parts = beforeEqual.split(",").map(p => p.trim());
+    if (parts.length < 2) {
+      return null;
+    }
+
+    let channelIndex = 0;
+    let messageIdStr: string;
+    let bitRangeStr: string;
+
+    // 判断是否包含通道索引
+    // 格式1: CAN_ID,BitRange (2个部分)
+    // 格式2: ChannelIndex,CAN_ID,BitRange (3个部分)
+    if (parts.length === 2) {
+      // 格式1: 无通道索引
+      messageIdStr = parts[0];
+      bitRangeStr = parts[1];
+    } else if (parts.length >= 3) {
+      // 格式2: 有通道索引
+      const firstIsHex = parts[0].toLowerCase().startsWith("0x");
+      if (firstIsHex) {
+        // 第一个是十六进制，认为是消息ID（无通道索引）
+        messageIdStr = parts[0];
+        bitRangeStr = parts[1];
+      } else {
+        // 第一个是十进制，认为是通道索引
+        channelIndex = parseInt(parts[0], 10);
+        if (isNaN(channelIndex)) {
+          return null;
+        }
+        messageIdStr = parts[1];
+        bitRangeStr = parts[2];
+      }
+    } else {
+      return null;
+    }
+
+    // 解析消息ID
+    const messageId = this.parseHexValue(messageIdStr);
+    if (messageId === null) {
+      return null;
+    }
+
+    // 解析位范围
+    const bitRanges = this.parseBitRanges(bitRangeStr);
+    if (bitRanges.length === 0) {
+      return null;
+    }
+
+    return {
+      channelIndex,
+      messageId,
+      bitRanges,
+      expectedValue,
+    };
   }
 
   /**

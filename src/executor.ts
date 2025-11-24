@@ -22,6 +22,7 @@ import {
   TdelayCommand,
   ChannelConfig,
   BitRange,
+  EmbeddedVerification,
 } from "./parser";
 
 // CAN设备相关类型
@@ -119,6 +120,9 @@ export interface AllTestsResult {
 
 // TX_DELAY_SEND_FLAG 位掩码 (Bit7)
 const TX_DELAY_SEND_FLAG = 0x80;
+
+// 内嵌校验条件的默认超时时间（毫秒）
+const EMBEDDED_VERIFICATION_TIMEOUT_MS = 1000;
 
 /**
  * Tester脚本执行器
@@ -569,6 +573,7 @@ export class TesterExecutor {
       duration: 0,
     };
 
+    // 执行显式命令
     for (const command of testCase.commands) {
       const cmdResult = await this.executeCommand(command);
       result.commandResults.push(cmdResult);
@@ -577,9 +582,129 @@ export class TesterExecutor {
       }
     }
 
+    // 执行内嵌校验条件（从测试用例名称中解析）
+    if (testCase.embeddedVerifications && testCase.embeddedVerifications.length > 0) {
+      for (const verification of testCase.embeddedVerifications) {
+        const verifyResult = await this.executeEmbeddedVerification(verification);
+        result.commandResults.push(verifyResult);
+        if (!verifyResult.success) {
+          result.success = false;
+        }
+      }
+    }
+
     result.duration = Date.now() - startTime;
     this.log(`    结果: ${result.success ? "PASS" : "FAIL"} (${result.duration}ms)`);
     return result;
+  }
+
+  /**
+   * 执行内嵌校验条件（从测试用例名称中解析的隐式tcanr）
+   */
+  private async executeEmbeddedVerification(verification: EmbeddedVerification): Promise<CommandResult> {
+    const rangeStr = verification.bitRanges.map((r) => `${r.startByte}.${r.startBit}-${r.endByte}.${r.endBit}`).join("+");
+    const cmdStr = `[隐式校验] tcanr ${verification.channelIndex},0x${verification.messageId.toString(16).toUpperCase()},${rangeStr},0x${verification.expectedValue.toString(16).toUpperCase()},${EMBEDDED_VERIFICATION_TIMEOUT_MS}`;
+
+    this.log(`    > ${cmdStr}`);
+
+    const channelHandle = this.channelHandles.get(verification.channelIndex);
+    if (channelHandle === undefined) {
+      return {
+        command: cmdStr,
+        success: false,
+        message: `项目通道 ${verification.channelIndex} 未初始化`,
+        line: -1,
+      };
+    }
+
+    try {
+      const isFD = this.isCanFD.get(verification.channelIndex) || false;
+      const startTime = Date.now();
+      let receivedFrame: ReceivedFrame | ReceivedFDFrame | null = null;
+
+      // 等待接收匹配的报文
+      while (Date.now() - startTime < EMBEDDED_VERIFICATION_TIMEOUT_MS) {
+        const frames = isFD
+          ? this.device.receiveFD(channelHandle, 100, 10)
+          : this.device.receive(channelHandle, 100, 10);
+
+        for (const frame of frames) {
+          if (frame.id === verification.messageId) {
+            receivedFrame = frame;
+            break;
+          }
+        }
+
+        if (receivedFrame) {
+          break;
+        }
+
+        // 短暂等待避免CPU占用过高
+        await this.delay(1);
+      }
+
+      if (!receivedFrame) {
+        return {
+          command: cmdStr,
+          success: false,
+          message: `接收超时 (${EMBEDDED_VERIFICATION_TIMEOUT_MS}ms)`,
+          line: -1,
+        };
+      }
+
+      // 提取位范围数据
+      const data = receivedFrame.data;
+      const extractedValues = verification.bitRanges.map((range) => this.extractBitRange(data, range));
+
+      // 合并所有位范围的值（如果有多个位范围，按位拼接）
+      let combinedValue = 0;
+      let bitOffset = 0;
+      for (let i = 0; i < verification.bitRanges.length; i++) {
+        const range = verification.bitRanges[i];
+        const bitsCount = this.calculateBitsCount(range);
+        combinedValue |= extractedValues[i] << bitOffset;
+        bitOffset += bitsCount;
+      }
+
+      // 校验
+      if (combinedValue === verification.expectedValue) {
+        this.log(`      校验通过: 0x${combinedValue.toString(16).toUpperCase()} == 0x${verification.expectedValue.toString(16).toUpperCase()}`);
+        return {
+          command: cmdStr,
+          success: true,
+          message: "数据校验通过",
+          line: -1,
+        };
+      } else {
+        this.log(`      校验失败: 期望 0x${verification.expectedValue.toString(16).toUpperCase()}, 实际 0x${combinedValue.toString(16).toUpperCase()}`);
+        return {
+          command: cmdStr,
+          success: false,
+          message: `数据校验失败: 期望 0x${verification.expectedValue.toString(16).toUpperCase()}, 实际 0x${combinedValue.toString(16).toUpperCase()}`,
+          line: -1,
+        };
+      }
+    } catch (error: any) {
+      return {
+        command: cmdStr,
+        success: false,
+        message: `接收失败: ${error.message}`,
+        line: -1,
+      };
+    }
+  }
+
+  /**
+   * 计算位范围包含的位数
+   */
+  private calculateBitsCount(range: BitRange): number {
+    let count = 0;
+    for (let byteIdx = range.startByte; byteIdx <= range.endByte; byteIdx++) {
+      const startBit = byteIdx === range.startByte ? range.startBit : 0;
+      const endBit = byteIdx === range.endByte ? range.endBit : 7;
+      count += endBit - startBit + 1;
+    }
+    return count;
   }
 
   /**
