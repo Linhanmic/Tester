@@ -41,11 +41,14 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.languages.registerHoverProvider("tester", new TesterHoverProvider())
   );
 
+  // 创建代码透视提供程序
+  const codeLensProvider = new TesterCodeLensProvider();
+
   // 注册代码透视提供程序
   context.subscriptions.push(
     vscode.languages.registerCodeLensProvider(
       "tester",
-      new TesterCodeLensProvider()
+      codeLensProvider
     )
   );
 
@@ -61,6 +64,11 @@ export function activate(context: vscode.ExtensionContext) {
 
   // 创建执行器实例
   const executor = new TesterExecutor();
+
+  // 监听执行状态变更，更新CodeLens
+  executor.onStateChange((state) => {
+    codeLensProvider.updateExecutionState(state);
+  });
 
   // 注册运行全部测试命令
   context.subscriptions.push(
@@ -88,6 +96,36 @@ export function activate(context: vscode.ExtensionContext) {
       "tester.runTestCaseByLine",
       async (documentUri: vscode.Uri, lineNumber: number, caseName: string) => {
         await executor.runTestCaseByLine(documentUri, lineNumber, caseName);
+      }
+    )
+  );
+
+  // 注册暂停执行命令
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "tester.pauseExecution",
+      () => {
+        executor.pauseAllTasks();
+      }
+    )
+  );
+
+  // 注册继续执行命令
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "tester.resumeExecution",
+      () => {
+        executor.resumeAllTasks();
+      }
+    )
+  );
+
+  // 注册停止执行命令
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "tester.stopExecution",
+      () => {
+        executor.stopAllTasks();
       }
     )
   );

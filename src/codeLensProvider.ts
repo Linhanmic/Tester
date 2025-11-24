@@ -1,11 +1,22 @@
 import * as vscode from 'vscode';
+import { ExecutionState } from './executor';
 
 export class TesterCodeLensProvider implements vscode.CodeLensProvider {
     private codeLenses: vscode.CodeLens[] = [];
     private _onDidChangeCodeLenses: vscode.EventEmitter<void> = new vscode.EventEmitter<void>();
     public readonly onDidChangeCodeLenses: vscode.Event<void> = this._onDidChangeCodeLenses.event;
 
+    private executionState: ExecutionState = 'idle';
+
     constructor() {}
+
+    /**
+     * 更新执行状态
+     */
+    public updateExecutionState(state: ExecutionState): void {
+        this.executionState = state;
+        this.refresh();
+    }
 
     public provideCodeLenses(document: vscode.TextDocument, token: vscode.CancellationToken): vscode.CodeLens[] | Thenable<vscode.CodeLens[]> {
         this.codeLenses = [];
@@ -15,9 +26,11 @@ export class TesterCodeLensProvider implements vscode.CodeLensProvider {
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i].trim();
 
-            // 在配置块顶部添加"运行全部测试"
+            // 在配置块顶部添加控制按钮
             if (line === 'tset') {
                 const range = new vscode.Range(i, 0, i, line.length);
+
+                // 运行全部测试按钮
                 this.codeLenses.push(
                     new vscode.CodeLens(range, {
                         title: '$(play) 运行全部测试',
@@ -25,6 +38,39 @@ export class TesterCodeLensProvider implements vscode.CodeLensProvider {
                         arguments: [document.uri]
                     })
                 );
+
+                // 根据执行状态显示不同的控制按钮
+                if (this.executionState === 'running') {
+                    this.codeLenses.push(
+                        new vscode.CodeLens(range, {
+                            title: '$(debug-pause) 暂停',
+                            command: 'tester.pauseExecution',
+                            arguments: []
+                        })
+                    );
+                    this.codeLenses.push(
+                        new vscode.CodeLens(range, {
+                            title: '$(debug-stop) 停止',
+                            command: 'tester.stopExecution',
+                            arguments: []
+                        })
+                    );
+                } else if (this.executionState === 'paused') {
+                    this.codeLenses.push(
+                        new vscode.CodeLens(range, {
+                            title: '$(debug-continue) 继续',
+                            command: 'tester.resumeExecution',
+                            arguments: []
+                        })
+                    );
+                    this.codeLenses.push(
+                        new vscode.CodeLens(range, {
+                            title: '$(debug-stop) 停止',
+                            command: 'tester.stopExecution',
+                            arguments: []
+                        })
+                    );
+                }
             }
 
             // 在测试用例集顶部添加"运行测试用例集"
