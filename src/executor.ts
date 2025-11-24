@@ -81,6 +81,7 @@ interface SendTask {
   timerId: ReturnType<typeof globalThis.setInterval> | null;
   isPaused: boolean;
   cmdStr: string;
+  hasError: boolean;
 }
 
 /** 执行结果 */
@@ -268,7 +269,7 @@ export class TesterExecutor {
   /**
    * 发送单帧
    */
-  private sendSingleFrame(channelHandle: number, task: SendTask, isFD: boolean): void {
+  private sendSingleFrame(channelHandle: number, task: SendTask, isFD: boolean): boolean {
     try {
       if (isFD) {
         const frame: CanFDFrame = {
@@ -276,18 +277,21 @@ export class TesterExecutor {
           len: task.data.length,
           data: [...task.data],
         };
-        this.device.transmitFD(channelHandle, [frame]);
+        this.device.transmitFD(channelHandle, frame);
       } else {
         const frame: CanFrame = {
           id: task.messageId,
           dlc: task.data.length,
           data: [...task.data],
         };
-        this.device.transmit(channelHandle, [frame]);
+        this.device.transmit(channelHandle, frame);
       }
       task.remainingCount--;
+      return true;
     } catch (error: any) {
       this.logError(`发送帧失败: ${error.message}`);
+      task.hasError = true;
+      return false;
     }
   }
 
@@ -784,12 +788,23 @@ export class TesterExecutor {
         timerId: null,
         isPaused: false,
         cmdStr,
+        hasError: false,
       };
 
       this.sendTasks.set(taskId, task);
 
-      // 启动发送任务
+      // 启动发送任务（会立即发送第一帧）
       this.startTaskTimer(task);
+
+      // 检查第一帧是否发送成功
+      if (task.hasError) {
+        return {
+          command: cmdStr,
+          success: false,
+          message: `发送帧失败`,
+          line: command.line,
+        };
+      }
 
       this.log(`    [发送] 已启动发送任务 #${taskId}: ID=0x${command.messageId.toString(16).toUpperCase()}, 间隔=${command.intervalMs}ms, 次数=${command.repeatCount}`);
 
