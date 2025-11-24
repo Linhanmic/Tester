@@ -120,12 +120,12 @@ export function activate(context: vscode.ExtensionContext) {
     )
   );
 
-  // 注册停止执行命令
+  // 注册停止执行命令（同时关闭设备）
   context.subscriptions.push(
     vscode.commands.registerCommand(
       "tester.stopExecution",
       () => {
-        executor.stopAllTasks();
+        executor.stopAllTasks(true);
       }
     )
   );

@@ -212,8 +212,9 @@ export class TesterExecutor {
 
   /**
    * 停止所有发送任务
+   * @param andCloseDevice 是否同时关闭设备（用户手动停止时为true）
    */
-  public stopAllTasks(): void {
+  public stopAllTasks(andCloseDevice: boolean = false): void {
     for (const task of this.sendTasks.values()) {
       if (task.timerId) {
         globalThis.clearInterval(task.timerId);
@@ -225,6 +226,11 @@ export class TesterExecutor {
     if (this.executionState !== "idle") {
       this.setState("stopped");
       this.log("[控制] 已停止所有发送任务");
+    }
+
+    if (andCloseDevice) {
+      this.closeDevice();
+      this.setState("idle");
     }
   }
 
@@ -361,9 +367,7 @@ export class TesterExecutor {
       }
     } finally {
       // 停止所有发送任务并关闭设备
-      this.stopAllTasks();
-      await this.closeDevice();
-      this.setState("idle");
+      this.stopAllTasks(true);
     }
 
     result.duration = Date.now() - startTime;
@@ -450,9 +454,8 @@ export class TesterExecutor {
     try {
       result = await this.executeTestSuite(suite);
     } finally {
-      this.stopAllTasks();
-      await this.closeDevice();
-      this.setState("idle");
+      // 停止所有发送任务并关闭设备
+      this.stopAllTasks(true);
     }
 
     this.log("\n========================================");
@@ -528,19 +531,15 @@ export class TesterExecutor {
 
     this.setState("running");
 
-    let result: TestCaseResult;
-    try {
-      result = await this.executeTestCase(testCase);
-    } finally {
-      this.stopAllTasks();
-      await this.closeDevice();
-      this.setState("idle");
-    }
+    const result = await this.executeTestCase(testCase, false);
 
     this.log("\n========================================");
     this.log(`测试用例 "${caseName}" 执行完成`);
     this.log(`结果: ${result.success ? "通过" : "失败"}`);
     this.log(`耗时: ${result.duration}ms`);
+    if (this.sendTasks.size > 0) {
+      this.log(`发送任务仍在运行中，点击"停止"按钮可停止所有发送`);
+    }
     this.log("========================================");
 
     // 显示通知
@@ -694,14 +693,18 @@ export class TesterExecutor {
 
   /**
    * 执行测试用例
+   * @param testCase 测试用例
+   * @param stopPrevious 是否停止之前的发送任务（切换测试用例时为true）
    */
-  private async executeTestCase(testCase: TestCase): Promise<TestCaseResult> {
+  private async executeTestCase(testCase: TestCase, stopPrevious: boolean = true): Promise<TestCaseResult> {
     const startTime = Date.now();
     const seqStr = testCase.sequenceNumber !== undefined ? `[${testCase.sequenceNumber}] ` : "";
     this.log(`\n  ${seqStr}${testCase.name}`);
 
-    // 停止之前的发送任务（切换测试用例时）
-    this.stopAllTasks();
+    // 切换测试用例时停止之前的发送任务
+    if (stopPrevious) {
+      this.stopAllTasks();
+    }
     this.setState("running");
 
     const result: TestCaseResult = {
