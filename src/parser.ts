@@ -242,19 +242,19 @@ export class TesterParser {
           projectChannelIndex++;
         }
       }
-      // 解析诊断配置
+      // 解析诊断配置（支持省略0x前缀，默认视为十六进制）
       else if (line.startsWith("tdiagnose_rid")) {
-        const value = this.parseHexValue(line.substring("tdiagnose_rid".length).trim());
+        const value = this.parseHexValueDefaultHex(line.substring("tdiagnose_rid".length).trim());
         if (value !== null) {
           diagnose.requestId = value;
         }
       } else if (line.startsWith("tdiagnose_sid")) {
-        const value = this.parseHexValue(line.substring("tdiagnose_sid".length).trim());
+        const value = this.parseHexValueDefaultHex(line.substring("tdiagnose_sid".length).trim());
         if (value !== null) {
           diagnose.responseId = value;
         }
       } else if (line.startsWith("tdiagnose_keyk")) {
-        const value = this.parseHexValue(line.substring("tdiagnose_keyk".length).trim());
+        const value = this.parseHexValueDefaultHex(line.substring("tdiagnose_keyk".length).trim());
         if (value !== null) {
           diagnose.securityKey = value;
         }
@@ -423,6 +423,7 @@ export class TesterParser {
   /**
    * 解析 tcans 命令
    * 格式: tcans [channel_index,]message_id,data_bytes,interval_ms,repeat_count
+   * 注意：报文ID可以省略0x前缀，默认视为十六进制
    */
   private parseTcansCommand(line: string): TcansCommand | null {
     const content = line.substring("tcans".length).trim();
@@ -439,30 +440,31 @@ export class TesterParser {
     let intervalMs: number;
     let repeatCount: number;
 
-    // 判断第一个参数是通道索引还是消息ID
-    const firstPart = parts[0];
-    const isHex = firstPart.toLowerCase().startsWith("0x");
-    const firstValue = this.parseHexValue(firstPart);
-
     if (parts.length === 4) {
       // 无通道索引: tcans message_id,data,interval,repeat
-      messageId = firstValue!;
+      messageId = this.parseHexValueDefaultHex(parts[0])!;
       dataStr = parts[1];
       intervalMs = parseInt(parts[2], 10);
       repeatCount = parseInt(parts[3], 10);
     } else if (parts.length >= 5) {
       // 有通道索引: tcans channel,message_id,data,interval,repeat
-      if (isHex) {
-        // 如果第一个是十六进制，可能是报文ID较大的情况
-        // 需要检查参数数量来判断
+      // 判断第一个参数是通道索引还是报文ID：
+      // 如果第二个参数包含'-'（数据字节格式），则第一个是报文ID
+      // 否则第一个是通道索引
+      const secondPart = parts[1];
+      const isSecondDataBytes = secondPart.includes("-");
+
+      if (isSecondDataBytes) {
+        // 第二个参数是数据字节，说明第一个是报文ID（省略了通道索引）
         channelIndex = 0;
-        messageId = firstValue!;
+        messageId = this.parseHexValueDefaultHex(parts[0])!;
         dataStr = parts[1];
         intervalMs = parseInt(parts[2], 10);
         repeatCount = parseInt(parts[3], 10);
       } else {
+        // 第一个是通道索引
         channelIndex = parseInt(parts[0], 10);
-        messageId = this.parseHexValue(parts[1])!;
+        messageId = this.parseHexValueDefaultHex(parts[1])!;
         dataStr = parts[2];
         intervalMs = parseInt(parts[3], 10);
         repeatCount = parseInt(parts[4], 10);
@@ -488,6 +490,7 @@ export class TesterParser {
   /**
    * 解析 tcanr 命令
    * 格式: tcanr [channel_index,]message_id,bit_range,expected_value|print,timeout_ms
+   * 注意：报文ID可以省略0x前缀，但期待值如果是16进制必须加上0x前缀
    */
   private parseTcanrCommand(line: string): TcanrCommand | null {
     const content = line.substring("tcanr".length).trim();
@@ -504,27 +507,30 @@ export class TesterParser {
     let expectedStr: string;
     let timeoutMs: number;
 
-    // 判断第一个参数是通道索引还是消息ID
-    const firstPart = parts[0];
-    const isHex = firstPart.toLowerCase().startsWith("0x");
-
     if (parts.length === 4) {
       // 无通道索引
-      messageId = this.parseHexValue(firstPart)!;
+      messageId = this.parseHexValueDefaultHex(parts[0])!;
       bitRangeStr = parts[1];
       expectedStr = parts[2];
       timeoutMs = parseInt(parts[3], 10);
     } else if (parts.length >= 5) {
-      if (isHex) {
-        // 第一个是十六进制，判断为消息ID
-        messageId = this.parseHexValue(firstPart)!;
+      // 判断第一个参数是通道索引还是报文ID：
+      // 如果第二个参数包含'.'（位范围格式），则第一个是报文ID
+      // 否则第一个是通道索引
+      const secondPart = parts[1];
+      const isSecondBitRange = secondPart.includes(".");
+
+      if (isSecondBitRange) {
+        // 第二个参数是位范围，说明第一个是报文ID（省略了通道索引）
+        channelIndex = 0;
+        messageId = this.parseHexValueDefaultHex(parts[0])!;
         bitRangeStr = parts[1];
         expectedStr = parts[2];
         timeoutMs = parseInt(parts[3], 10);
       } else {
-        // 有通道索引
+        // 第一个是通道索引
         channelIndex = parseInt(parts[0], 10);
-        messageId = this.parseHexValue(parts[1])!;
+        messageId = this.parseHexValueDefaultHex(parts[1])!;
         bitRangeStr = parts[2];
         expectedStr = parts[3];
         timeoutMs = parseInt(parts[4], 10);
@@ -629,6 +635,19 @@ export class TesterParser {
       return parseInt(str, 16);
     }
     return parseInt(str, 10);
+  }
+
+  /**
+   * 解析十六进制值（支持省略0x前缀，默认视为十六进制）
+   * 根据规范：报文ID、诊断请求ID、诊断响应ID、tdiagnose_keyk等可以省略0x前缀
+   */
+  private parseHexValueDefaultHex(str: string): number | null {
+    str = str.trim();
+    if (str.toLowerCase().startsWith("0x")) {
+      return parseInt(str, 16);
+    }
+    // 省略0x前缀，默认视为十六进制
+    return parseInt(str, 16);
   }
 
   /**
