@@ -3,9 +3,9 @@
   "displayName": "Tester",
   "description": "Tester语言支持插件，用于CAN总线通信的开发、测试和调试。",
   "version": "0.0.4",
-  "publisher": "林寒",
+  "publisher": "Linhanmic",
   "author": {
-    "name": "林寒",
+    "name": "Linhanmic",
     "email": "linhanmic@qq.com",
     "url": "https://linhanmic.github.io/"
   },
@@ -23,6 +23,10 @@
   ],
   "activationEvents": [],
   "main": "./dist/extension.js",
+  "files": [
+    "out/**/*",
+    "src/zlgcan"
+  ],
   "contributes": {
     "languages": [
       {

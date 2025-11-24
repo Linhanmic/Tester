@@ -119,9 +119,9 @@ export class TesterFormattingProvider
       return line.replace(/ttitle\s*=\s*/, "ttitle=");
     }
 
-    // 2. tstart (tstart = ...)
+    // 2. tstart (tstart=...)
     if (/\btstart\b/.test(line)) {
-      return line.replace(/\s*=\s*/, " = ");
+      return line.replace(/\s*=\s*/, "=");
     }
 
     // 3. 紧凑逗号的命令 (tcaninit, tcans, tcanr, tdiagnose_dtc)
