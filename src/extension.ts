@@ -117,6 +117,24 @@ export function activate(context: vscode.ExtensionContext) {
     statusBar.setRunning(state === 'running');
   });
 
+  // 辅助函数：更新设备状态视图
+  const updateDeviceStatus = () => {
+    const deviceInfo = executor.getDeviceInfo();
+    deviceStatusProvider.updateStatus({
+      connected: deviceInfo.connected,
+      deviceType: deviceInfo.deviceType,
+      deviceIndex: deviceInfo.deviceIndex,
+      channels: deviceInfo.channels.map(ch => ({
+        index: ch.deviceIndex,
+        projectIndex: ch.projectIndex,
+        baudrate: ch.baudrate,
+        dataBaudrate: ch.dataBaudrate,
+        isFD: ch.isFD,
+        running: ch.running,
+      })),
+    });
+  };
+
   // 注册运行全部测试命令
   context.subscriptions.push(
     vscode.commands.registerCommand(
@@ -130,6 +148,7 @@ export function activate(context: vscode.ExtensionContext) {
           total: result.totalPassed + result.totalFailed,
           running: false
         });
+        updateDeviceStatus();
       }
     )
   );
@@ -147,6 +166,7 @@ export function activate(context: vscode.ExtensionContext) {
           total: result.passed + result.failed,
           running: false
         });
+        updateDeviceStatus();
       }
     )
   );
@@ -164,6 +184,7 @@ export function activate(context: vscode.ExtensionContext) {
           total: 1,
           running: false
         });
+        updateDeviceStatus();
       }
     )
   );
@@ -269,10 +290,38 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   // 监听手动发送请求
-  manualSendProvider.onSendMessage((request) => {
-    // TODO: 实现手动发送逻辑
-    // 需要从executor获取设备实例并发送
-    manualSendProvider.showSendResult(false, '手动发送功能开发中');
+  manualSendProvider.onSendMessage(async (request) => {
+    const result = await executor.manualSendMessage(
+      request.channel,
+      request.id,
+      request.data,
+      request.isFD
+    );
+    manualSendProvider.showSendResult(result.success, result.message);
+  });
+
+  // 监听executor的报文发送事件，推送到监视视图
+  executor.onMessageSent((message) => {
+    messageMonitorProvider.addMessage({
+      timestamp: message.timestamp,
+      channel: message.channel,
+      id: message.id,
+      dlc: message.dlc,
+      data: message.data,
+      direction: 'tx',
+    });
+  });
+
+  // 监听executor的报文接收事件，推送到监视视图
+  executor.onMessageReceived((message) => {
+    messageMonitorProvider.addMessage({
+      timestamp: message.timestamp,
+      channel: message.channel,
+      id: message.id,
+      dlc: message.dlc,
+      data: message.data,
+      direction: 'rx',
+    });
   });
 
   // ========== 文档事件监听 ==========

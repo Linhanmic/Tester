@@ -127,6 +127,44 @@ export interface AllTestsResult {
 /** 执行状态 */
 export type ExecutionState = "idle" | "running" | "paused" | "stopped";
 
+/** 接收的CAN报文 */
+export interface ReceivedCanMessage {
+  timestamp: number;
+  channel: number;
+  id: number;
+  dlc: number;
+  data: number[];
+  isFD: boolean;
+}
+
+/** 发送的CAN报文 */
+export interface SentCanMessage {
+  timestamp: number;
+  channel: number;
+  id: number;
+  dlc: number;
+  data: number[];
+  isFD: boolean;
+}
+
+/** 设备信息 */
+export interface DeviceInfo {
+  connected: boolean;
+  deviceType: string;
+  deviceIndex: number;
+  channels: ChannelInfo[];
+}
+
+/** 通道信息 */
+export interface ChannelInfo {
+  projectIndex: number;
+  deviceIndex: number;
+  baudrate: number;
+  dataBaudrate?: number;
+  isFD: boolean;
+  running: boolean;
+}
+
 /**
  * Tester脚本执行器
  */
@@ -155,6 +193,14 @@ export class TesterExecutor {
   private _onStateChange: vscode.EventEmitter<ExecutionState> = new vscode.EventEmitter<ExecutionState>();
   public readonly onStateChange: vscode.Event<ExecutionState> = this._onStateChange.event;
 
+  // 报文接收事件
+  private _onMessageReceived: vscode.EventEmitter<ReceivedCanMessage> = new vscode.EventEmitter<ReceivedCanMessage>();
+  public readonly onMessageReceived: vscode.Event<ReceivedCanMessage> = this._onMessageReceived.event;
+
+  // 报文发送事件
+  private _onMessageSent: vscode.EventEmitter<SentCanMessage> = new vscode.EventEmitter<SentCanMessage>();
+  public readonly onMessageSent: vscode.Event<SentCanMessage> = this._onMessageSent.event;
+
   constructor() {
     this.outputChannel = vscode.window.createOutputChannel("Tester 执行器");
     this.parser = new TesterParser();
@@ -173,6 +219,85 @@ export class TesterExecutor {
   private setState(state: ExecutionState): void {
     this.executionState = state;
     this._onStateChange.fire(state);
+  }
+
+  /**
+   * 获取设备信息
+   */
+  public getDeviceInfo(): DeviceInfo {
+    if (!this.deviceInitialized || !this.device) {
+      return {
+        connected: false,
+        deviceType: '',
+        deviceIndex: 0,
+        channels: [],
+      };
+    }
+
+    const channels: ChannelInfo[] = [];
+    for (const config of this.channelConfigs) {
+      channels.push({
+        projectIndex: config.projectChannelIndex,
+        deviceIndex: config.channelIndex,
+        baudrate: config.arbitrationBaudrate,
+        dataBaudrate: config.dataBaudrate,
+        isFD: this.isCanFD.get(config.projectChannelIndex) || false,
+        running: this.channelHandles.has(config.projectChannelIndex),
+      });
+    }
+
+    return {
+      connected: true,
+      deviceType: this.channelConfigs[0]?.deviceId.toString() || '',
+      deviceIndex: this.channelConfigs[0]?.deviceIndex || 0,
+      channels,
+    };
+  }
+
+  /**
+   * 手动发送CAN报文
+   */
+  public async manualSendMessage(channel: number, id: number, data: number[], isFD: boolean): Promise<{ success: boolean; message: string }> {
+    if (!this.deviceInitialized || !this.device) {
+      return { success: false, message: '设备未初始化' };
+    }
+
+    const channelHandle = this.channelHandles.get(channel);
+    if (channelHandle === undefined) {
+      return { success: false, message: `通道 ${channel} 未初始化` };
+    }
+
+    try {
+      if (isFD) {
+        const frame: CanFDFrame = {
+          id,
+          len: data.length,
+          data: [...data],
+        };
+        this.device.transmitFD(channelHandle, frame);
+      } else {
+        const frame: CanFrame = {
+          id,
+          dlc: data.length,
+          data: [...data],
+        };
+        this.device.transmit(channelHandle, frame);
+      }
+
+      // 触发发送事件
+      this._onMessageSent.fire({
+        timestamp: Date.now(),
+        channel,
+        id,
+        dlc: data.length,
+        data: [...data],
+        isFD,
+      });
+
+      return { success: true, message: '发送成功' };
+    } catch (error: any) {
+      return { success: false, message: `发送失败: ${error.message}` };
+    }
   }
 
   /**
@@ -296,6 +421,17 @@ export class TesterExecutor {
         };
         this.device.transmit(channelHandle, frame);
       }
+
+      // 触发发送事件
+      this._onMessageSent.fire({
+        timestamp: Date.now(),
+        channel: task.channelIndex,
+        id: task.messageId,
+        dlc: task.data.length,
+        data: [...task.data],
+        isFD,
+      });
+
       task.remainingCount--;
       return true;
     } catch (error: any) {
