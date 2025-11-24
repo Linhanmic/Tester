@@ -8,9 +8,11 @@
  * - tcans命令将报文添加到设备队列后立即执行下一条指令
  * - tdelay命令延时后执行下一条命令
  * - 每个测试用例开始时清除设备发送队列
+ * - 执行时显示进度，支持取消操作
  */
 
 import * as vscode from "vscode";
+import * as path from "path";
 import {
   TesterParser,
   ConfigurationBlock,
@@ -30,21 +32,19 @@ interface CanFrame {
   dlc: number;
   data: number[];
   transmitType?: number;
-  // 队列发送相关字段
-  __pad?: number; // Bit7 为 TX_DELAY_SEND_FLAG
-  __res0?: number; // 帧间隔低8位
-  __res1?: number; // 帧间隔高8位
+  __pad?: number;
+  __res0?: number;
+  __res1?: number;
 }
 
 interface CanFDFrame {
   id: number;
   len: number;
   data: number[];
-  flags?: number; // Bit7 为 TX_DELAY_SEND_FLAG
+  flags?: number;
   transmitType?: number;
-  // 队列发送相关字段
-  __res0?: number; // 帧间隔低8位
-  __res1?: number; // 帧间隔高8位
+  __res0?: number;
+  __res1?: number;
 }
 
 interface ReceivedFrame {
@@ -127,13 +127,14 @@ export class TesterExecutor {
   private outputChannel: vscode.OutputChannel;
   private parser: TesterParser;
   private device: any = null;
-  private channelHandles: Map<number, number> = new Map(); // 项目通道索引 -> 设备通道句柄
+  private channelHandles: Map<number, number> = new Map();
   private channelConfigs: ChannelConfig[] = [];
-  private isCanFD: Map<number, boolean> = new Map(); // 项目通道索引 -> 是否为CAN-FD
-  private channelIndexMap: Map<number, number> = new Map(); // 项目通道索引 -> 设备通道索引
-
-  // ZLG CAN 模块引用
+  private isCanFD: Map<number, boolean> = new Map();
+  private channelIndexMap: Map<number, number> = new Map();
   private zlgcanModule: any = null;
+
+  // 取消令牌
+  private cancellationTokenSource: vscode.CancellationTokenSource | null = null;
 
   constructor() {
     this.outputChannel = vscode.window.createOutputChannel("Tester 执行器");
@@ -141,250 +142,341 @@ export class TesterExecutor {
   }
 
   /**
+   * 检查是否已取消
+   */
+  private checkCancellation(token?: vscode.CancellationToken): boolean {
+    return token?.isCancellationRequested ?? false;
+  }
+
+  /**
    * 运行全部测试
    */
   public async runAllTests(documentUri: vscode.Uri): Promise<AllTestsResult> {
-    const document = await vscode.workspace.openTextDocument(documentUri);
-    const text = document.getText();
+    // 取消之前的执行
+    this.cancelExecution();
+    this.cancellationTokenSource = new vscode.CancellationTokenSource();
 
-    this.outputChannel.clear();
-    this.outputChannel.show(true);
-    this.log("========================================");
-    this.log("开始执行全部测试");
-    this.log(`文件: ${documentUri.fsPath}`);
-    this.log("========================================\n");
+    return vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: "Tester: 运行全部测试",
+        cancellable: true,
+      },
+      async (progress, token) => {
+        // 合并取消令牌
+        const combinedToken = this.cancellationTokenSource!.token;
+        token.onCancellationRequested(() => {
+          this.cancellationTokenSource?.cancel();
+        });
 
-    const startTime = Date.now();
-    const result: AllTestsResult = {
-      suiteResults: [],
-      totalPassed: 0,
-      totalFailed: 0,
-      duration: 0,
-    };
+        const document = await vscode.workspace.openTextDocument(documentUri);
+        const text = document.getText();
 
-    // 解析文档
-    const parseResult = this.parser.parse(text);
-    if (!parseResult.program) {
-      this.logError("解析失败:");
-      for (const error of parseResult.errors) {
-        this.logError(`  第 ${error.line + 1} 行: ${error.message}`);
-      }
-      result.duration = Date.now() - startTime;
-      return result;
-    }
+        this.outputChannel.clear();
+        this.outputChannel.show(true);
+        this.log("========================================");
+        this.log("开始执行全部测试");
+        this.log(`文件: ${documentUri.fsPath}`);
+        this.log("========================================\n");
 
-    const program = parseResult.program;
+        const startTime = Date.now();
+        const result: AllTestsResult = {
+          suiteResults: [],
+          totalPassed: 0,
+          totalFailed: 0,
+          duration: 0,
+        };
 
-    // 初始化设备（必须成功）
-    if (program.configuration) {
-      const initResult = await this.initializeDevice(program.configuration);
-      if (!initResult.success) {
-        this.logError(`设备初始化失败: ${initResult.message}`);
-        vscode.window.showErrorMessage(`设备初始化失败: ${initResult.message}`);
+        // 解析文档
+        const parseResult = this.parser.parse(text);
+        if (!parseResult.program) {
+          this.logError("解析失败:");
+          for (const error of parseResult.errors) {
+            this.logError(`  第 ${error.line + 1} 行: ${error.message}`);
+          }
+          result.duration = Date.now() - startTime;
+          return result;
+        }
+
+        const program = parseResult.program;
+
+        // 初始化设备
+        progress.report({ message: "初始化设备...", increment: 0 });
+
+        if (program.configuration) {
+          const initResult = await this.initializeDevice(program.configuration);
+          if (!initResult.success) {
+            this.logError(`设备初始化失败: ${initResult.message}`);
+            vscode.window.showErrorMessage(`设备初始化失败: ${initResult.message}`);
+            result.duration = Date.now() - startTime;
+            return result;
+          }
+        } else {
+          this.logError("缺少配置块，无法初始化设备");
+          vscode.window.showErrorMessage("缺少配置块，无法初始化设备");
+          result.duration = Date.now() - startTime;
+          return result;
+        }
+
+        try {
+          const totalSuites = program.testSuites.length;
+          let completedSuites = 0;
+
+          for (const suite of program.testSuites) {
+            if (this.checkCancellation(combinedToken)) {
+              this.log("\n[用户取消] 测试已终止");
+              break;
+            }
+
+            progress.report({
+              message: `执行用例集: ${suite.name}`,
+              increment: (1 / totalSuites) * 100,
+            });
+
+            const suiteResult = await this.executeTestSuite(suite, combinedToken);
+            result.suiteResults.push(suiteResult);
+            result.totalPassed += suiteResult.passed;
+            result.totalFailed += suiteResult.failed;
+            completedSuites++;
+          }
+        } finally {
+          this.clearAllSendQueues();
+          await this.closeDevice();
+        }
+
         result.duration = Date.now() - startTime;
+
+        this.log("\n========================================");
+        this.log("测试执行完成");
+        this.log(`通过: ${result.totalPassed}, 失败: ${result.totalFailed}`);
+        this.log(`总耗时: ${result.duration}ms`);
+        this.log("========================================");
+
+        if (!this.checkCancellation(combinedToken)) {
+          if (result.totalFailed === 0) {
+            vscode.window.showInformationMessage(`所有测试通过! (${result.totalPassed}个用例)`);
+          } else {
+            vscode.window.showWarningMessage(`测试完成: ${result.totalPassed}通过, ${result.totalFailed}失败`);
+          }
+        }
+
         return result;
       }
-    } else {
-      this.logError("缺少配置块，无法初始化设备");
-      vscode.window.showErrorMessage("缺少配置块，无法初始化设备");
-      result.duration = Date.now() - startTime;
-      return result;
-    }
-
-    try {
-      // 执行所有测试用例集
-      for (const suite of program.testSuites) {
-        const suiteResult = await this.executeTestSuite(suite);
-        result.suiteResults.push(suiteResult);
-        result.totalPassed += suiteResult.passed;
-        result.totalFailed += suiteResult.failed;
-      }
-    } finally {
-      // 关闭设备
-      await this.closeDevice();
-    }
-
-    result.duration = Date.now() - startTime;
-
-    this.log("\n========================================");
-    this.log("测试执行完成");
-    this.log(`通过: ${result.totalPassed}, 失败: ${result.totalFailed}`);
-    this.log(`总耗时: ${result.duration}ms`);
-    this.log("========================================");
-
-    // 显示汇总通知
-    if (result.totalFailed === 0) {
-      vscode.window.showInformationMessage(`所有测试通过! (${result.totalPassed}个用例)`);
-    } else {
-      vscode.window.showWarningMessage(`测试完成: ${result.totalPassed}通过, ${result.totalFailed}失败`);
-    }
-
-    return result;
+    );
   }
 
   /**
    * 运行指定测试用例集
    */
   public async runTestSuiteByLine(documentUri: vscode.Uri, lineNumber: number, suiteName: string): Promise<TestSuiteResult> {
-    const document = await vscode.workspace.openTextDocument(documentUri);
-    const text = document.getText();
+    this.cancelExecution();
+    this.cancellationTokenSource = new vscode.CancellationTokenSource();
 
-    this.outputChannel.clear();
-    this.outputChannel.show(true);
-    this.log("========================================");
-    this.log(`开始执行测试用例集: ${suiteName}`);
-    this.log(`文件: ${documentUri.fsPath}`);
-    this.log(`行号: ${lineNumber + 1}`);
-    this.log("========================================\n");
+    return vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: `Tester: 运行用例集 - ${suiteName}`,
+        cancellable: true,
+      },
+      async (progress, token) => {
+        const combinedToken = this.cancellationTokenSource!.token;
+        token.onCancellationRequested(() => {
+          this.cancellationTokenSource?.cancel();
+        });
 
-    const startTime = Date.now();
+        const document = await vscode.workspace.openTextDocument(documentUri);
+        const text = document.getText();
 
-    // 首先解析整个文档获取配置
-    const fullParseResult = this.parser.parse(text);
-    const configuration = fullParseResult.program?.configuration;
+        this.outputChannel.clear();
+        this.outputChannel.show(true);
+        this.log("========================================");
+        this.log(`开始执行测试用例集: ${suiteName}`);
+        this.log(`文件: ${documentUri.fsPath}`);
+        this.log(`行号: ${lineNumber + 1}`);
+        this.log("========================================\n");
 
-    // 解析指定行的测试用例集
-    const suite = this.parser.parseTestSuiteAtLine(text, lineNumber);
-    if (!suite) {
-      this.logError(`无法解析测试用例集 "${suiteName}"`);
-      return {
-        name: suiteName,
-        testCaseResults: [],
-        passed: 0,
-        failed: 0,
-        duration: Date.now() - startTime,
-      };
-    }
+        const startTime = Date.now();
 
-    // 初始化设备（必须成功）
-    if (configuration) {
-      const initResult = await this.initializeDevice(configuration);
-      if (!initResult.success) {
-        this.logError(`设备初始化失败: ${initResult.message}`);
-        vscode.window.showErrorMessage(`设备初始化失败: ${initResult.message}`);
-        return {
-          name: suiteName,
-          testCaseResults: [],
-          passed: 0,
-          failed: 0,
-          duration: Date.now() - startTime,
-        };
+        const fullParseResult = this.parser.parse(text);
+        const configuration = fullParseResult.program?.configuration;
+
+        const suite = this.parser.parseTestSuiteAtLine(text, lineNumber);
+        if (!suite) {
+          this.logError(`无法解析测试用例集 "${suiteName}"`);
+          return {
+            name: suiteName,
+            testCaseResults: [],
+            passed: 0,
+            failed: 0,
+            duration: Date.now() - startTime,
+          };
+        }
+
+        progress.report({ message: "初始化设备...", increment: 0 });
+
+        if (configuration) {
+          const initResult = await this.initializeDevice(configuration);
+          if (!initResult.success) {
+            this.logError(`设备初始化失败: ${initResult.message}`);
+            vscode.window.showErrorMessage(`设备初始化失败: ${initResult.message}`);
+            return {
+              name: suiteName,
+              testCaseResults: [],
+              passed: 0,
+              failed: 0,
+              duration: Date.now() - startTime,
+            };
+          }
+        } else {
+          this.logError("缺少配置块，无法初始化设备");
+          vscode.window.showErrorMessage("缺少配置块，无法初始化设备");
+          return {
+            name: suiteName,
+            testCaseResults: [],
+            passed: 0,
+            failed: 0,
+            duration: Date.now() - startTime,
+          };
+        }
+
+        let result: TestSuiteResult;
+        try {
+          result = await this.executeTestSuite(suite, combinedToken, progress);
+        } finally {
+          this.clearAllSendQueues();
+          await this.closeDevice();
+        }
+
+        this.log("\n========================================");
+        this.log(`测试用例集 "${suiteName}" 执行完成`);
+        this.log(`通过: ${result.passed}, 失败: ${result.failed}`);
+        this.log(`耗时: ${result.duration}ms`);
+        this.log("========================================");
+
+        if (!this.checkCancellation(combinedToken)) {
+          if (result.failed === 0) {
+            vscode.window.showInformationMessage(`测试用例集 "${suiteName}" 全部通过! (${result.passed}个用例)`);
+          } else {
+            vscode.window.showWarningMessage(`"${suiteName}": ${result.passed}通过, ${result.failed}失败`);
+          }
+        }
+
+        return result;
       }
-    } else {
-      this.logError("缺少配置块，无法初始化设备");
-      vscode.window.showErrorMessage("缺少配置块，无法初始化设备");
-      return {
-        name: suiteName,
-        testCaseResults: [],
-        passed: 0,
-        failed: 0,
-        duration: Date.now() - startTime,
-      };
-    }
-
-    let result: TestSuiteResult;
-    try {
-      result = await this.executeTestSuite(suite);
-    } finally {
-      await this.closeDevice();
-    }
-
-    this.log("\n========================================");
-    this.log(`测试用例集 "${suiteName}" 执行完成`);
-    this.log(`通过: ${result.passed}, 失败: ${result.failed}`);
-    this.log(`耗时: ${result.duration}ms`);
-    this.log("========================================");
-
-    // 显示通知
-    if (result.failed === 0) {
-      vscode.window.showInformationMessage(`测试用例集 "${suiteName}" 全部通过! (${result.passed}个用例)`);
-    } else {
-      vscode.window.showWarningMessage(`"${suiteName}": ${result.passed}通过, ${result.failed}失败`);
-    }
-
-    return result;
+    );
   }
 
   /**
    * 运行指定测试用例
    */
   public async runTestCaseByLine(documentUri: vscode.Uri, lineNumber: number, caseName: string): Promise<TestCaseResult> {
-    const document = await vscode.workspace.openTextDocument(documentUri);
-    const text = document.getText();
+    this.cancelExecution();
+    this.cancellationTokenSource = new vscode.CancellationTokenSource();
 
-    this.outputChannel.clear();
-    this.outputChannel.show(true);
-    this.log("========================================");
-    this.log(`开始执行测试用例: ${caseName}`);
-    this.log(`文件: ${documentUri.fsPath}`);
-    this.log(`行号: ${lineNumber + 1}`);
-    this.log("========================================\n");
+    return vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: `Tester: 运行用例 - ${caseName}`,
+        cancellable: true,
+      },
+      async (progress, token) => {
+        const combinedToken = this.cancellationTokenSource!.token;
+        token.onCancellationRequested(() => {
+          this.cancellationTokenSource?.cancel();
+        });
 
-    const startTime = Date.now();
+        const document = await vscode.workspace.openTextDocument(documentUri);
+        const text = document.getText();
 
-    // 解析测试用例和配置
-    const parseResult = this.parser.parseTestCaseAtLine(text, lineNumber);
-    if (!parseResult) {
-      this.logError(`无法解析测试用例 "${caseName}"`);
-      return {
-        name: caseName,
-        success: false,
-        commandResults: [],
-        duration: Date.now() - startTime,
-      };
-    }
+        this.outputChannel.clear();
+        this.outputChannel.show(true);
+        this.log("========================================");
+        this.log(`开始执行测试用例: ${caseName}`);
+        this.log(`文件: ${documentUri.fsPath}`);
+        this.log(`行号: ${lineNumber + 1}`);
+        this.log("========================================\n");
 
-    const { testCase, configuration } = parseResult;
+        const startTime = Date.now();
 
-    // 初始化设备（必须成功）
-    if (configuration) {
-      const initResult = await this.initializeDevice(configuration);
-      if (!initResult.success) {
-        this.logError(`设备初始化失败: ${initResult.message}`);
-        vscode.window.showErrorMessage(`设备初始化失败: ${initResult.message}`);
-        return {
-          name: caseName,
-          success: false,
-          commandResults: [],
-          duration: Date.now() - startTime,
-        };
+        const parseResult = this.parser.parseTestCaseAtLine(text, lineNumber);
+        if (!parseResult) {
+          this.logError(`无法解析测试用例 "${caseName}"`);
+          return {
+            name: caseName,
+            success: false,
+            commandResults: [],
+            duration: Date.now() - startTime,
+          };
+        }
+
+        const { testCase, configuration } = parseResult;
+
+        progress.report({ message: "初始化设备...", increment: 0 });
+
+        if (configuration) {
+          const initResult = await this.initializeDevice(configuration);
+          if (!initResult.success) {
+            this.logError(`设备初始化失败: ${initResult.message}`);
+            vscode.window.showErrorMessage(`设备初始化失败: ${initResult.message}`);
+            return {
+              name: caseName,
+              success: false,
+              commandResults: [],
+              duration: Date.now() - startTime,
+            };
+          }
+        } else {
+          this.logError("缺少配置块，无法初始化设备");
+          vscode.window.showErrorMessage("缺少配置块，无法初始化设备");
+          return {
+            name: caseName,
+            success: false,
+            commandResults: [],
+            duration: Date.now() - startTime,
+          };
+        }
+
+        let result: TestCaseResult;
+        try {
+          progress.report({ message: `执行: ${testCase.name}`, increment: 50 });
+          result = await this.executeTestCase(testCase, combinedToken);
+        } finally {
+          this.clearAllSendQueues();
+          await this.closeDevice();
+        }
+
+        this.log("\n========================================");
+        this.log(`测试用例 "${caseName}" 执行完成`);
+        this.log(`结果: ${result.success ? "通过" : "失败"}`);
+        this.log(`耗时: ${result.duration}ms`);
+        this.log("========================================");
+
+        if (!this.checkCancellation(combinedToken)) {
+          if (result.success) {
+            vscode.window.showInformationMessage(`测试用例 "${caseName}" 通过!`);
+          } else {
+            vscode.window.showErrorMessage(`测试用例 "${caseName}" 失败`);
+          }
+        }
+
+        return result;
       }
-    } else {
-      this.logError("缺少配置块，无法初始化设备");
-      vscode.window.showErrorMessage("缺少配置块，无法初始化设备");
-      return {
-        name: caseName,
-        success: false,
-        commandResults: [],
-        duration: Date.now() - startTime,
-      };
-    }
-
-    let result: TestCaseResult;
-    try {
-      result = await this.executeTestCase(testCase);
-    } finally {
-      await this.closeDevice();
-    }
-
-    this.log("\n========================================");
-    this.log(`测试用例 "${caseName}" 执行完成`);
-    this.log(`结果: ${result.success ? "通过" : "失败"}`);
-    this.log(`耗时: ${result.duration}ms`);
-    this.log("========================================");
-
-    // 显示通知
-    if (result.success) {
-      vscode.window.showInformationMessage(`测试用例 "${caseName}" 通过!`);
-    } else {
-      vscode.window.showErrorMessage(`测试用例 "${caseName}" 失败`);
-    }
-
-    return result;
+    );
   }
 
   /**
-   * 初始化CAN设备（不支持模拟模式）
+   * 取消执行
+   */
+  public cancelExecution(): void {
+    if (this.cancellationTokenSource) {
+      this.cancellationTokenSource.cancel();
+      this.cancellationTokenSource.dispose();
+      this.cancellationTokenSource = null;
+    }
+  }
+
+  /**
+   * 初始化CAN设备
    */
   private async initializeDevice(config: ConfigurationBlock): Promise<ExecutionResult> {
     this.log("初始化CAN设备...");
@@ -394,11 +486,28 @@ export class TesterExecutor {
     this.channelIndexMap.clear();
 
     try {
-      // 动态加载ZlgCanDevice
+      // 获取扩展目录路径
+      const extensionPath = path.dirname(__dirname);
+      const libPath = path.join(extensionPath, "lib");
+
+      // 设置动态链接库搜索路径 (Windows)
+      if (process.platform === "win32") {
+        const currentPath = process.env.PATH || "";
+        if (!currentPath.includes(libPath)) {
+          process.env.PATH = `${libPath};${currentPath}`;
+        }
+      }
+
+      // 加载zlgcan.node
+      const zlgcanPath = path.join(libPath, "zlgcan.node");
+      this.log(`  加载驱动: ${zlgcanPath}`);
+
       // eslint-disable-next-line @typescript-eslint/no-require-imports
-      this.zlgcanModule = require("./zlgcan/index.js");
-      const ZlgCanDevice = this.zlgcanModule.ZlgCanDevice;
-      const CanType = this.zlgcanModule.CanType;
+      const zlgcan = require(zlgcanPath);
+      this.zlgcanModule = zlgcan;
+
+      const ZlgCanDevice = zlgcan.ZlgCanDevice;
+      const CanType = zlgcan.CanType;
 
       this.device = new ZlgCanDevice();
 
@@ -416,7 +525,6 @@ export class TesterExecutor {
       for (const [, channels] of deviceGroups) {
         const firstChannel = channels[0];
 
-        // 打开设备
         this.log(`  打开设备: type=${firstChannel.deviceId}, index=${firstChannel.deviceIndex}`);
         const opened = this.device.openDevice(firstChannel.deviceId, firstChannel.deviceIndex, 0);
         if (!opened) {
@@ -426,7 +534,6 @@ export class TesterExecutor {
           };
         }
 
-        // 初始化每个通道
         for (const channel of channels) {
           const isFD = channel.dataBaudrate !== undefined;
           this.isCanFD.set(channel.projectChannelIndex, isFD);
@@ -447,7 +554,6 @@ export class TesterExecutor {
             };
           }
 
-          // 启动通道
           const started = this.device.startCanChannel(handle);
           if (!started) {
             return {
@@ -523,7 +629,11 @@ export class TesterExecutor {
   /**
    * 执行测试用例集
    */
-  private async executeTestSuite(suite: TestSuite): Promise<TestSuiteResult> {
+  private async executeTestSuite(
+    suite: TestSuite,
+    token?: vscode.CancellationToken,
+    progress?: vscode.Progress<{ message?: string; increment?: number }>
+  ): Promise<TestSuiteResult> {
     const startTime = Date.now();
     this.log(`\n>>> 测试用例集: ${suite.name}`);
     this.log("-".repeat(40));
@@ -536,14 +646,30 @@ export class TesterExecutor {
       duration: 0,
     };
 
+    const totalCases = suite.testCases.length;
+    let completedCases = 0;
+
     for (const testCase of suite.testCases) {
-      const caseResult = await this.executeTestCase(testCase);
+      if (this.checkCancellation(token)) {
+        this.log("\n[用户取消] 测试已终止");
+        break;
+      }
+
+      if (progress) {
+        progress.report({
+          message: `${suite.name}: ${testCase.name}`,
+          increment: (1 / totalCases) * 100,
+        });
+      }
+
+      const caseResult = await this.executeTestCase(testCase, token);
       result.testCaseResults.push(caseResult);
       if (caseResult.success) {
         result.passed++;
       } else {
         result.failed++;
       }
+      completedCases++;
     }
 
     result.duration = Date.now() - startTime;
@@ -554,12 +680,12 @@ export class TesterExecutor {
   /**
    * 执行测试用例
    */
-  private async executeTestCase(testCase: TestCase): Promise<TestCaseResult> {
+  private async executeTestCase(testCase: TestCase, token?: vscode.CancellationToken): Promise<TestCaseResult> {
     const startTime = Date.now();
     const seqStr = testCase.sequenceNumber !== undefined ? `[${testCase.sequenceNumber}] ` : "";
     this.log(`\n  ${seqStr}${testCase.name}`);
 
-    // 清除所有通道的发送队列，避免上一个测试用例的干扰
+    // 清除所有通道的发送队列
     this.clearAllSendQueues();
 
     const result: TestCaseResult = {
@@ -570,6 +696,12 @@ export class TesterExecutor {
     };
 
     for (const command of testCase.commands) {
+      if (this.checkCancellation(token)) {
+        this.log("\n    [用户取消] 测试用例已终止");
+        result.success = false;
+        break;
+      }
+
       const cmdResult = await this.executeCommand(command);
       result.commandResults.push(cmdResult);
       if (!cmdResult.success) {
@@ -604,9 +736,7 @@ export class TesterExecutor {
   }
 
   /**
-   * 执行 tcans 命令（添加到设备发送队列）
-   * 使用ZLG设备的队列发送功能，将报文批量添加到设备队列
-   * 设备会按照预设的帧间隔自动发送
+   * 执行 tcans 命令
    */
   private async executeTcans(command: TcansCommand): Promise<CommandResult> {
     const dataStr = command.data.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join("-");
@@ -627,42 +757,36 @@ export class TesterExecutor {
     const isFD = this.isCanFD.get(command.channelIndex) || false;
 
     try {
-      // 准备要发送的帧数组
-      // 帧间隔单位ms，需要填入res0(低8位)和res1(高8位)
-      const intervalLow = command.intervalMs & 0xFF;
-      const intervalHigh = (command.intervalMs >> 8) & 0xFF;
+      const intervalLow = command.intervalMs & 0xff;
+      const intervalHigh = (command.intervalMs >> 8) & 0xff;
 
       let totalSent = 0;
 
       if (isFD) {
-        // CANFD帧: TX_DELAY_SEND_FLAG 在 flags 的 Bit7
         const frames: CanFDFrame[] = [];
         for (let i = 0; i < command.repeatCount; i++) {
           frames.push({
             id: command.messageId,
             len: command.data.length,
             data: [...command.data],
-            flags: TX_DELAY_SEND_FLAG, // Bit7 = 1 启用队列发送
+            flags: TX_DELAY_SEND_FLAG,
             __res0: intervalLow,
             __res1: intervalHigh,
           });
         }
-        // 批量发送到设备队列
         totalSent = this.device.transmitFD(channelHandle, frames);
       } else {
-        // CAN帧: TX_DELAY_SEND_FLAG 在 __pad 的 Bit7
         const frames: CanFrame[] = [];
         for (let i = 0; i < command.repeatCount; i++) {
           frames.push({
             id: command.messageId,
             dlc: command.data.length,
             data: [...command.data],
-            __pad: TX_DELAY_SEND_FLAG, // Bit7 = 1 启用队列发送
+            __pad: TX_DELAY_SEND_FLAG,
             __res0: intervalLow,
             __res1: intervalHigh,
           });
         }
-        // 批量发送到设备队列
         totalSent = this.device.transmit(channelHandle, frames);
       }
 
@@ -694,11 +818,14 @@ export class TesterExecutor {
   }
 
   /**
-   * 执行 tcanr 命令（接收并校验报文）
+   * 执行 tcanr 命令
    */
   private async executeTcanr(command: TcanrCommand): Promise<CommandResult> {
     const rangeStr = command.bitRanges.map((r) => `${r.startByte}.${r.startBit}-${r.endByte}.${r.endBit}`).join("+");
-    const expectedStr = command.expectedValues === "print" ? "print" : command.expectedValues.map((v) => `0x${v.toString(16).toUpperCase()}`).join("+");
+    const expectedStr =
+      command.expectedValues === "print"
+        ? "print"
+        : command.expectedValues.map((v) => `0x${v.toString(16).toUpperCase()}`).join("+");
     const cmdStr = `tcanr ${command.channelIndex},0x${command.messageId.toString(16).toUpperCase()},${rangeStr},${expectedStr},${command.timeoutMs}`;
 
     this.log(`    > ${cmdStr}`);
@@ -718,7 +845,6 @@ export class TesterExecutor {
       const startTime = Date.now();
       let receivedFrame: ReceivedFrame | ReceivedFDFrame | null = null;
 
-      // 等待接收匹配的报文
       while (Date.now() - startTime < command.timeoutMs) {
         const frames = isFD
           ? this.device.receiveFD(channelHandle, 100, 10)
@@ -735,7 +861,6 @@ export class TesterExecutor {
           break;
         }
 
-        // 短暂等待避免CPU占用过高
         await this.delay(1);
       }
 
@@ -748,12 +873,10 @@ export class TesterExecutor {
         };
       }
 
-      // 提取位范围数据
       const data = receivedFrame.data;
       const extractedValues = command.bitRanges.map((range) => this.extractBitRange(data, range));
 
       if (command.expectedValues === "print") {
-        // 输出模式
         const valueStrs = extractedValues.map((v) => `0x${v.toString(16).toUpperCase()}`);
         this.log(`      接收值: ${valueStrs.join(", ")}`);
         return {
@@ -763,12 +886,13 @@ export class TesterExecutor {
           line: command.line,
         };
       } else {
-        // 校验模式
         let allMatch = true;
         for (let i = 0; i < extractedValues.length && i < command.expectedValues.length; i++) {
           if (extractedValues[i] !== command.expectedValues[i]) {
             allMatch = false;
-            this.log(`      期望: 0x${command.expectedValues[i].toString(16).toUpperCase()}, 实际: 0x${extractedValues[i].toString(16).toUpperCase()}`);
+            this.log(
+              `      期望: 0x${command.expectedValues[i].toString(16).toUpperCase()}, 实际: 0x${extractedValues[i].toString(16).toUpperCase()}`
+            );
           }
         }
 
@@ -799,13 +923,12 @@ export class TesterExecutor {
   }
 
   /**
-   * 执行 tdelay 命令（延时后执行下一条命令）
+   * 执行 tdelay 命令
    */
   private async executeTdelay(command: TdelayCommand): Promise<CommandResult> {
     const cmdStr = `tdelay ${command.delayMs}`;
     this.log(`    > ${cmdStr}`);
 
-    // 延时指定时间
     await this.delay(command.delayMs);
 
     return {
