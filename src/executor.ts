@@ -139,6 +139,10 @@ export class TesterExecutor {
   private isCanFD: Map<number, boolean> = new Map();
   private channelIndexMap: Map<number, number> = new Map();
 
+  // 设备是否已初始化
+  private deviceInitialized: boolean = false;
+  private currentConfigHash: string = "";
+
   // ZLG CAN 模块引用
   private zlgcanModule: any = null;
 
@@ -553,9 +557,38 @@ export class TesterExecutor {
   }
 
   /**
+   * 计算配置哈希值，用于判断配置是否变化
+   */
+  private getConfigHash(config: ConfigurationBlock): string {
+    return JSON.stringify(config.channels.map(c => ({
+      deviceId: c.deviceId,
+      deviceIndex: c.deviceIndex,
+      channelIndex: c.channelIndex,
+      projectChannelIndex: c.projectChannelIndex,
+      arbitrationBaudrate: c.arbitrationBaudrate,
+      dataBaudrate: c.dataBaudrate,
+    })));
+  }
+
+  /**
    * 初始化CAN设备（不支持模拟模式）
+   * 如果设备已初始化且配置相同，则复用现有设备
    */
   private async initializeDevice(config: ConfigurationBlock): Promise<ExecutionResult> {
+    const configHash = this.getConfigHash(config);
+
+    // 如果设备已初始化且配置相同，直接返回成功
+    if (this.deviceInitialized && this.device && this.currentConfigHash === configHash) {
+      this.log("复用已初始化的CAN设备\n");
+      return { success: true, message: "设备已就绪" };
+    }
+
+    // 如果设备已打开但配置不同，先关闭
+    if (this.deviceInitialized && this.device) {
+      this.log("配置已变更，重新初始化设备...");
+      this.closeDevice();
+    }
+
     this.log("初始化CAN设备...");
     this.channelConfigs = config.channels;
     this.channelHandles.clear();
@@ -629,9 +662,13 @@ export class TesterExecutor {
         }
       }
 
+      this.deviceInitialized = true;
+      this.currentConfigHash = configHash;
       this.log("设备初始化完成\n");
       return { success: true, message: "设备初始化成功" };
     } catch (error: any) {
+      this.deviceInitialized = false;
+      this.currentConfigHash = "";
       return {
         success: false,
         message: `加载CAN设备驱动失败: ${error.message}`,
@@ -642,7 +679,7 @@ export class TesterExecutor {
   /**
    * 关闭CAN设备
    */
-  private async closeDevice(): Promise<void> {
+  private closeDevice(): void {
     if (this.device) {
       try {
         this.device.closeDevice();
@@ -653,6 +690,8 @@ export class TesterExecutor {
       this.device = null;
     }
     this.channelHandles.clear();
+    this.deviceInitialized = false;
+    this.currentConfigHash = "";
   }
 
   // ========== 测试执行 ==========

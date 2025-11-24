@@ -56,6 +56,34 @@
         "path": "./snippets/tester.json"
       }
     ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "tester-explorer",
+          "title": "CAN Tester",
+          "icon": "$(symbol-event)"
+        }
+      ]
+    },
+    "views": {
+      "tester-explorer": [
+        {
+          "id": "tester.deviceStatus",
+          "name": "设备状态",
+          "type": "webview"
+        },
+        {
+          "id": "tester.messageMonitor",
+          "name": "报文监视",
+          "type": "webview"
+        },
+        {
+          "id": "tester.manualSend",
+          "name": "手动发送",
+          "type": "webview"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "tester.runAllTests",
@@ -71,6 +99,46 @@
         "command": "tester.runTestCaseByLine",
         "title": "Tester: 运行测试用例",
         "icon": "$(play)"
+      },
+      {
+        "command": "tester.pauseExecution",
+        "title": "Tester: 暂停执行",
+        "icon": "$(debug-pause)"
+      },
+      {
+        "command": "tester.resumeExecution",
+        "title": "Tester: 继续执行",
+        "icon": "$(debug-continue)"
+      },
+      {
+        "command": "tester.stopExecution",
+        "title": "Tester: 停止执行",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "tester.openDevice",
+        "title": "Tester: 打开设备",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "tester.closeDevice",
+        "title": "Tester: 关闭设备",
+        "icon": "$(debug-disconnect)"
+      },
+      {
+        "command": "tester.toggleMonitorMode",
+        "title": "Tester: 切换监视模式",
+        "icon": "$(list-tree)"
+      },
+      {
+        "command": "tester.clearMessages",
+        "title": "Tester: 清空报文",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "tester.sendMessage",
+        "title": "Tester: 发送报文",
+        "icon": "$(arrow-right)"
       }
     ]
   },
