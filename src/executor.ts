@@ -201,6 +201,10 @@ export class TesterExecutor {
   private _onMessageSent: vscode.EventEmitter<SentCanMessage> = new vscode.EventEmitter<SentCanMessage>();
   public readonly onMessageSent: vscode.Event<SentCanMessage> = this._onMessageSent.event;
 
+  // 报文接收轮询
+  private receivePollingTimer: ReturnType<typeof globalThis.setInterval> | null = null;
+  private receivePollingInterval = 10; // 接收轮询间隔(ms)
+
   constructor() {
     this.outputChannel = vscode.window.createOutputChannel("Tester 执行器");
     this.parser = new TesterParser();
@@ -360,6 +364,63 @@ export class TesterExecutor {
     if (andCloseDevice) {
       this.closeDevice();
       this.setState("idle");
+    }
+  }
+
+  /**
+   * 启动报文接收轮询
+   */
+  private startReceivePolling(): void {
+    if (this.receivePollingTimer) {
+      return; // 已经在轮询中
+    }
+
+    this.receivePollingTimer = globalThis.setInterval(() => {
+      this.pollReceiveMessages();
+    }, this.receivePollingInterval);
+  }
+
+  /**
+   * 停止报文接收轮询
+   */
+  private stopReceivePolling(): void {
+    if (this.receivePollingTimer) {
+      globalThis.clearInterval(this.receivePollingTimer);
+      this.receivePollingTimer = null;
+    }
+  }
+
+  /**
+   * 轮询接收报文
+   */
+  private pollReceiveMessages(): void {
+    if (!this.device || !this.deviceInitialized) {
+      return;
+    }
+
+    // 遍历所有通道接收报文
+    for (const [projectChannelIndex, channelHandle] of this.channelHandles) {
+      try {
+        const isFD = this.isCanFD.get(projectChannelIndex) || false;
+        const frames = isFD
+          ? this.device.receiveFD(channelHandle, 100, 0) // 非阻塞接收
+          : this.device.receive(channelHandle, 100, 0);
+
+        if (frames && frames.length > 0) {
+          for (const frame of frames) {
+            this._onMessageReceived.fire({
+              timestamp: Date.now(),
+              channel: projectChannelIndex,
+              id: frame.id,
+              dlc: isFD ? frame.len : frame.dlc,
+              data: frame.data,
+              isFD,
+            });
+          }
+        }
+      } catch (error: any) {
+        // 接收错误静默处理，避免频繁输出错误
+      }
     }
   }
 
@@ -800,6 +861,10 @@ export class TesterExecutor {
 
       this.deviceInitialized = true;
       this.currentConfigHash = configHash;
+
+      // 启动报文接收轮询
+      this.startReceivePolling();
+
       this.log("设备初始化完成\n");
       return { success: true, message: "设备初始化成功" };
     } catch (error: any) {
@@ -816,6 +881,9 @@ export class TesterExecutor {
    * 关闭CAN设备
    */
   private closeDevice(): void {
+    // 停止报文接收轮询
+    this.stopReceivePolling();
+
     if (this.device) {
       try {
         this.device.closeDevice();
