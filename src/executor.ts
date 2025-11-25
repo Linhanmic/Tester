@@ -917,7 +917,6 @@ export class TesterExecutor {
           // 设置通道波特率（必须在 initCanChannel 之前调用）
           const ch = channel.channelIndex.toString();
           const abitBaudrate = (channel.arbitrationBaudrate * 1000).toString(); // 转换为Hz
-          const dbitBaudrate = isFD ? ((channel.dataBaudrate || 2000) * 1000).toString() : abitBaudrate;
 
           // 设置仲裁域波特率
           const abitResult = this.device.setValue(`${ch}/canfd_abit_baud_rate`, abitBaudrate);
@@ -925,10 +924,13 @@ export class TesterExecutor {
             this.log(`    警告: 通道${ch} 设置仲裁段波特率失败，将使用默认值`);
           }
 
-          // 设置数据域波特率
-          const dbitResult = this.device.setValue(`${ch}/canfd_dbit_baud_rate`, dbitBaudrate);
-          if (dbitResult === 0) {
-            this.log(`    警告: 通道${ch} 设置数据段波特率失败，将使用默认值`);
+          // 只有在CAN FD模式下才设置数据域波特率
+          if (isFD) {
+            const dbitBaudrate = ((channel.dataBaudrate || 2000) * 1000).toString();
+            const dbitResult = this.device.setValue(`${ch}/canfd_dbit_baud_rate`, dbitBaudrate);
+            if (dbitResult === 0) {
+              this.log(`    警告: 通道${ch} 设置数据段波特率失败，将使用默认值`);
+            }
           }
 
           // 使能终端电阻（如果需要）
@@ -939,6 +941,8 @@ export class TesterExecutor {
 
           const handle = this.device.initCanChannel(channel.channelIndex, channelConfig);
           if (handle === 0) {
+            // 通道初始化失败，关闭设备后返回错误
+            this.closeDevice();
             return {
               success: false,
               message: `无法初始化通道 ${channel.channelIndex}`,
@@ -948,6 +952,8 @@ export class TesterExecutor {
           // 启动通道
           const started = this.device.startCanChannel(handle);
           if (!started) {
+            // 通道启动失败，关闭设备后返回错误
+            this.closeDevice();
             return {
               success: false,
               message: `无法启动通道 ${channel.channelIndex}`,
@@ -967,8 +973,8 @@ export class TesterExecutor {
       this.log("设备初始化完成\n");
       return { success: true, message: "设备初始化成功" };
     } catch (error: any) {
-      this.deviceInitialized = false;
-      this.currentConfigHash = "";
+      // 发生异常时，确保关闭已打开的设备
+      this.closeDevice();
       return {
         success: false,
         message: `加载CAN设备驱动失败: ${error.message}`,
