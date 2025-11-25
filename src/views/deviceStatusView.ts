@@ -169,22 +169,22 @@ export class DeviceStatusViewProvider implements vscode.WebviewViewProvider {
     }
     .channel-item {
       display: flex;
-      justify-content: space-between;
+      justify-content: flex-start;
       align-items: center;
       padding: 4px 6px;
       margin: 2px 0;
       background: var(--vscode-editor-inactiveSelectionBackground);
       border-radius: 3px;
       font-size: 10px;
+      overflow-x: auto;
     }
     .channel-name {
       font-weight: 500;
       min-width: 30px;
     }
     .channel-info {
-      flex: 1;
-      margin: 0 8px;
       color: var(--vscode-descriptionForeground);
+      white-space: nowrap;
     }
     button {
       width: 100%;
@@ -347,9 +347,13 @@ export class DeviceStatusViewProvider implements vscode.WebviewViewProvider {
       <div class="form-group">
         <label>设备类型</label>
         <select id="configDeviceType">
-          <option value="4">USBCANFD-200U</option>
-          <option value="21">USBCAN-II</option>
+          <option value="41">USBCANFD-200U</option>
+          <option value="21">USBCAN-2E-U</option>
+          <option value="4">USBCAN-II</option>
           <option value="3">USBCAN-I</option>
+          <option value="59">USBCANFD-800U</option>
+          <option value="76">USBCANFD-400U</option>
+          <option value="42">USBCANFD-100U</option>
         </select>
       </div>
       <div class="form-group">
@@ -402,6 +406,33 @@ export class DeviceStatusViewProvider implements vscode.WebviewViewProvider {
   <script>
     const vscode = acquireVsCodeApi();
     let deviceConfigs = [];
+
+    // 设备类型名称映射
+    const deviceTypeNames = {
+      1: 'PCI5121', 2: 'PCI9810', 3: 'USBCAN-I', 4: 'USBCAN-II', 5: 'PCI9820',
+      6: 'CAN232', 7: 'PCI5110', 8: 'CANLITE', 9: 'ISA9620', 10: 'ISA5420',
+      11: 'PC104CAN', 12: 'CANETE/UDP', 13: 'DNP9810', 14: 'PCI9840', 15: 'PC104CAN2',
+      16: 'PCI9820I', 17: 'CANETTCP', 18: 'PCIE-9220', 19: 'PCI5010U', 20: 'USBCAN-E-U',
+      21: 'USBCAN-2E-U', 22: 'PCI5020U', 23: 'EG20T-CAN', 24: 'PCIE9221', 25: 'WIFICAN-TCP',
+      26: 'WIFICAN-UDP', 27: 'PCIe9120', 28: 'PCIe9110', 29: 'PCIe9140', 31: 'USBCAN-4E-U',
+      32: 'CANDTU-200UR', 33: 'CANDTU-MINI', 34: 'USBCAN-8E-U', 35: 'CANREPLAY', 36: 'CANDTU-NET',
+      37: 'CANDTU-100UR', 38: 'PCIE-CANFD-100U', 39: 'PCIE-CANFD-200U', 40: 'PCIE-CANFD-400U',
+      41: 'USBCANFD-200U', 42: 'USBCANFD-100U', 43: 'USBCANFD-MINI', 44: 'CANFDCOM-100IE',
+      45: 'CANSCOPE', 46: 'CLOUD', 47: 'CANDTU-NET-400', 48: 'CANFDNET-200U-TCP',
+      49: 'CANFDNET-200U-UDP', 50: 'CANFDWIFI-100U-TCP', 51: 'CANFDWIFI-100U-UDP',
+      52: 'CANFDNET-400U-TCP', 53: 'CANFDNET-400U-UDP', 54: 'CANFDBLUE-200U',
+      55: 'CANFDNET-100U-TCP', 56: 'CANFDNET-100U-UDP', 57: 'CANFDNET-800U-TCP',
+      58: 'CANFDNET-800U-UDP', 59: 'USBCANFD-800U', 60: 'PCIE-CANFD-100U-EX',
+      61: 'PCIE-CANFD-400U-EX', 62: 'PCIE-CANFD-200U-MINI', 63: 'PCIE-CANFD-200U-EX/M2',
+      64: 'CANFDDTU-400-TCP', 65: 'CANFDDTU-400-UDP', 66: 'CANFDWIFI-200U-TCP',
+      67: 'CANFDWIFI-200U-UDP', 68: 'CANFDDTU-800ER-TCP', 69: 'CANFDDTU-800ER-UDP',
+      70: 'CANFDDTU-800EWGR-TCP', 71: 'CANFDDTU-800EWGR-UDP', 72: 'CANFDDTU-600EWGR-TCP',
+      73: 'CANFDDTU-600EWGR-UDP', 74: 'CANFDDTU-CASCADE-TCP', 75: 'CANFDDTU-CASCADE-UDP',
+      76: 'USBCANFD-400U', 77: 'CANFDDTU-200U', 78: 'ZPSCANFD-TCP', 79: 'ZPSCANFD-USB',
+      80: 'CANFDBRIDGE-PLUS', 81: 'CANFDDTU-300U', 82: 'PCIE-CANFD-800U',
+      83: 'PCIE-CANFD-1200U', 84: 'MINI-PCIE-CANFD', 85: 'USBCANFD-800H',
+      86: 'BG002', 87: 'BG004', 98: 'OFFLINE-DEVICE', 99: 'VIRTUAL-DEVICE'
+    };
 
     function openDevice() {
       vscode.postMessage({ type: 'openDevice' });
@@ -540,8 +571,7 @@ export class DeviceStatusViewProvider implements vscode.WebviewViewProvider {
 
       let html = '';
       for (const config of configs) {
-        const deviceTypeNames = { 3: 'USBCAN-I', 4: 'USBCANFD-200U', 21: 'USBCAN-II' };
-        const deviceTypeName = deviceTypeNames[config.deviceType] || 'Unknown';
+        const deviceTypeName = deviceTypeNames[config.deviceType] || 'Unknown-' + config.deviceType;
 
         html += '<div class="device-list-item">';
         html += '<div class="device-list-item-header">';
@@ -582,13 +612,21 @@ export class DeviceStatusViewProvider implements vscode.WebviewViewProvider {
           let channelsHtml = '';
           for (const ch of status.channels) {
             channelsHtml += '<div class="channel-item">';
-            channelsHtml += '<span class="channel-name">CH' + ch.projectIndex + '</span>';
-            channelsHtml += '<span class="channel-info">';
-            if (ch.isFD && ch.dataBaudrate) {
-              channelsHtml += ch.baudrate + '/' + ch.dataBaudrate + 'k';
-            } else {
-              channelsHtml += ch.baudrate + 'k';
-            }
+            channelsHtml += '<span class="channel-name" style="min-width: 50px;">CH' + ch.projectIndex + '</span>';
+            channelsHtml += '<span class="channel-info" style="margin: 0 4px;">';
+            channelsHtml += status.deviceType + ' #' + status.deviceIndex;
+            channelsHtml += '</span>';
+            channelsHtml += '<span class="channel-info" style="margin: 0 4px;">';
+            channelsHtml += 'DCH' + ch.index;
+            channelsHtml += '</span>';
+            channelsHtml += '<span class="channel-info" style="margin: 0 4px;">';
+            channelsHtml += ch.isFD ? 'CANFD' : 'CAN';
+            channelsHtml += '</span>';
+            channelsHtml += '<span class="channel-info" style="margin: 0 4px;">';
+            channelsHtml += ch.baudrate + 'k';
+            channelsHtml += '</span>';
+            channelsHtml += '<span class="channel-info" style="margin: 0 4px;">';
+            channelsHtml += ch.dataBaudrate ? (ch.dataBaudrate + 'k') : '-';
             channelsHtml += '</span>';
             channelsHtml += '<span class="status-indicator ' + (ch.running ? 'connected' : 'disconnected') + '"></span>';
             channelsHtml += '</div>';
