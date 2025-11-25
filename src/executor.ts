@@ -913,6 +913,29 @@ export class TesterExecutor {
           this.log(`  初始化通道: 项目通道${channel.projectChannelIndex} -> 设备通道${channel.channelIndex}`);
           this.log(`    波特率: ${channel.arbitrationBaudrate}kbps${isFD ? `, 数据域: ${channel.dataBaudrate}kbps` : ""}`);
 
+          // 设置通道波特率（必须在 initCanChannel 之前调用）
+          const ch = channel.channelIndex.toString();
+          const abitBaudrate = (channel.arbitrationBaudrate * 1000).toString(); // 转换为Hz
+          const dbitBaudrate = isFD ? ((channel.dataBaudrate || 2000) * 1000).toString() : abitBaudrate;
+
+          // 设置仲裁域波特率
+          const abitResult = this.device.setValue(`${ch}/canfd_abit_baud_rate`, abitBaudrate);
+          if (abitResult === 0) {
+            this.log(`    警告: 通道${ch} 设置仲裁段波特率失败，将使用默认值`);
+          }
+
+          // 设置数据域波特率
+          const dbitResult = this.device.setValue(`${ch}/canfd_dbit_baud_rate`, dbitBaudrate);
+          if (dbitResult === 0) {
+            this.log(`    警告: 通道${ch} 设置数据段波特率失败，将使用默认值`);
+          }
+
+          // 使能终端电阻（如果需要）
+          const resistResult = this.device.setValue(`${ch}/initenal_resistance`, "1");
+          if (resistResult === 0) {
+            this.log(`    警告: 通道${ch} 使能终端电阻失败`);
+          }
+
           const handle = this.device.initCanChannel(channel.channelIndex, channelConfig);
           if (handle === 0) {
             return {

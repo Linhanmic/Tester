@@ -3,6 +3,7 @@
 out/**
 node_modules/**
 src/**
+!src/zlgcan/**
 .gitignore
 .yarnrc
 esbuild.js
@@ -11,4 +12,7 @@ vsc-extension-quickstart.md
 **/eslint.config.mjs
 **/*.map
 **/*.ts
+!src/zlgcan/**/*.dll
+!src/zlgcan/**/*.node
+!src/zlgcan/**/*.lib
 **/.vscode-test.*
