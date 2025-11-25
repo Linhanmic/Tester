@@ -378,6 +378,7 @@ export function activate(context: vscode.ExtensionContext) {
       dlc: message.dlc,
       data: message.data,
       direction: 'tx',
+      isFD: message.isFD,
     });
   });
 
@@ -390,6 +391,7 @@ export function activate(context: vscode.ExtensionContext) {
       dlc: message.dlc,
       data: message.data,
       direction: 'rx',
+      isFD: message.isFD,
     });
   });
 

@@ -122,64 +122,80 @@ export class DeviceStatusViewProvider implements vscode.WebviewViewProvider {
       font-family: var(--vscode-font-family);
       font-size: var(--vscode-font-size);
       color: var(--vscode-foreground);
-      padding: 10px;
+      padding: 8px;
       margin: 0;
     }
     .section {
-      margin-bottom: 16px;
+      margin-bottom: 12px;
       border-bottom: 1px solid var(--vscode-widget-border);
-      padding-bottom: 16px;
+      padding-bottom: 8px;
     }
     .section-title {
       font-weight: bold;
-      margin-bottom: 8px;
-      font-size: 12px;
+      margin-bottom: 6px;
+      font-size: 11px;
       color: var(--vscode-descriptionForeground);
+      text-transform: uppercase;
     }
     .status-item {
       display: flex;
       justify-content: space-between;
-      padding: 4px 0;
-      border-bottom: 1px solid var(--vscode-widget-border);
+      align-items: center;
+      padding: 2px 0;
+      font-size: 11px;
     }
     .status-label {
       color: var(--vscode-descriptionForeground);
-      font-size: 11px;
     }
     .status-value {
-      font-weight: bold;
-      font-size: 11px;
+      font-weight: 500;
     }
-    .connected {
-      color: var(--vscode-testing-iconPassed);
+    .status-indicator {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      display: inline-block;
+      margin-left: 6px;
     }
-    .disconnected {
-      color: var(--vscode-testing-iconFailed);
+    .status-indicator.connected {
+      background-color: var(--vscode-testing-iconPassed);
+      box-shadow: 0 0 4px var(--vscode-testing-iconPassed);
+    }
+    .status-indicator.disconnected {
+      background-color: var(--vscode-testing-iconFailed);
     }
     .channel-list {
-      margin-top: 10px;
+      margin-top: 6px;
     }
     .channel-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 4px 6px;
+      margin: 2px 0;
       background: var(--vscode-editor-inactiveSelectionBackground);
-      padding: 8px;
-      margin: 4px 0;
-      border-radius: 4px;
+      border-radius: 3px;
+      font-size: 10px;
     }
-    .channel-header {
-      font-weight: bold;
-      margin-bottom: 4px;
-      font-size: 11px;
+    .channel-name {
+      font-weight: 500;
+      min-width: 30px;
+    }
+    .channel-info {
+      flex: 1;
+      margin: 0 8px;
+      color: var(--vscode-descriptionForeground);
     }
     button {
       width: 100%;
-      padding: 8px;
-      margin-top: 8px;
+      padding: 6px;
+      margin-top: 6px;
       background: var(--vscode-button-background);
       color: var(--vscode-button-foreground);
       border: none;
-      border-radius: 4px;
+      border-radius: 3px;
       cursor: pointer;
-      font-size: 12px;
+      font-size: 11px;
     }
     button:hover {
       background: var(--vscode-button-hoverBackground);
@@ -192,17 +208,17 @@ export class DeviceStatusViewProvider implements vscode.WebviewViewProvider {
       background: var(--vscode-button-secondaryHoverBackground);
     }
     button.small {
-      padding: 4px 8px;
-      font-size: 11px;
+      padding: 3px 6px;
+      font-size: 10px;
       width: auto;
       display: inline-block;
     }
     .device-list-item {
       background: var(--vscode-editor-inactiveSelectionBackground);
-      padding: 8px;
-      margin: 4px 0;
-      border-radius: 4px;
-      cursor: pointer;
+      padding: 6px;
+      margin: 3px 0;
+      border-radius: 3px;
+      font-size: 10px;
     }
     .device-list-item:hover {
       background: var(--vscode-list-hoverBackground);
@@ -211,19 +227,20 @@ export class DeviceStatusViewProvider implements vscode.WebviewViewProvider {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 4px;
+      margin-bottom: 3px;
     }
     .device-list-item-name {
-      font-weight: bold;
-      font-size: 12px;
+      font-weight: 500;
+      font-size: 11px;
     }
     .device-list-item-info {
-      font-size: 10px;
+      font-size: 9px;
       color: var(--vscode-descriptionForeground);
+      line-height: 1.3;
     }
     .device-list-item-actions {
       display: flex;
-      gap: 4px;
+      gap: 3px;
     }
     .form-group {
       margin-bottom: 10px;
@@ -304,16 +321,12 @@ export class DeviceStatusViewProvider implements vscode.WebviewViewProvider {
   <div class="section">
     <div class="section-title">当前设备</div>
     <div class="status-item">
-      <span class="status-label">连接状态</span>
-      <span id="connStatus" class="status-value disconnected">未连接</span>
-    </div>
-    <div class="status-item" id="deviceInfo" style="display: none;">
-      <span class="status-label">设备</span>
-      <span id="deviceType" class="status-value">-</span>
+      <span class="status-label" id="deviceType">未连接</span>
+      <span><span class="status-indicator disconnected" id="statusIndicator"></span></span>
     </div>
     <div class="channel-list" id="channelList"></div>
-    <button id="connectBtn" onclick="openDevice()">从文件打开设备</button>
-    <button id="disconnectBtn" class="secondary" onclick="closeDevice()" style="display: none;">关闭设备</button>
+    <button id="connectBtn" onclick="openDevice()">从文件打开</button>
+    <button id="disconnectBtn" class="secondary" onclick="closeDevice()" style="display: none;">关闭</button>
   </div>
 
   <!-- 设备列表 -->
@@ -554,37 +567,36 @@ export class DeviceStatusViewProvider implements vscode.WebviewViewProvider {
 
       if (message.type === 'updateStatus') {
         const status = message.status;
-        const connStatus = document.getElementById('connStatus');
-        const deviceInfo = document.getElementById('deviceInfo');
         const deviceType = document.getElementById('deviceType');
+        const statusIndicator = document.getElementById('statusIndicator');
         const channelList = document.getElementById('channelList');
         const connectBtn = document.getElementById('connectBtn');
         const disconnectBtn = document.getElementById('disconnectBtn');
 
         if (status.connected) {
-          connStatus.textContent = '已连接';
-          connStatus.className = 'status-value connected';
-          deviceInfo.style.display = 'flex';
           deviceType.textContent = status.deviceType + ' #' + status.deviceIndex;
+          statusIndicator.className = 'status-indicator connected';
           connectBtn.style.display = 'none';
           disconnectBtn.style.display = 'block';
 
           let channelsHtml = '';
           for (const ch of status.channels) {
             channelsHtml += '<div class="channel-item">';
-            channelsHtml += '<div class="channel-header">通道 ' + ch.projectIndex + '</div>';
-            channelsHtml += '<div class="status-item"><span class="status-label">波特率</span><span>' + ch.baudrate + ' kbps</span></div>';
+            channelsHtml += '<span class="channel-name">CH' + ch.projectIndex + '</span>';
+            channelsHtml += '<span class="channel-info">';
             if (ch.isFD && ch.dataBaudrate) {
-              channelsHtml += '<div class="status-item"><span class="status-label">数据域</span><span>' + ch.dataBaudrate + ' kbps</span></div>';
+              channelsHtml += ch.baudrate + '/' + ch.dataBaudrate + 'k';
+            } else {
+              channelsHtml += ch.baudrate + 'k';
             }
-            channelsHtml += '<div class="status-item"><span class="status-label">状态</span><span class="' + (ch.running ? 'connected' : 'disconnected') + '">' + (ch.running ? '运行中' : '已停止') + '</span></div>';
+            channelsHtml += '</span>';
+            channelsHtml += '<span class="status-indicator ' + (ch.running ? 'connected' : 'disconnected') + '"></span>';
             channelsHtml += '</div>';
           }
           channelList.innerHTML = channelsHtml;
         } else {
-          connStatus.textContent = '未连接';
-          connStatus.className = 'status-value disconnected';
-          deviceInfo.style.display = 'none';
+          deviceType.textContent = '未连接';
+          statusIndicator.className = 'status-indicator disconnected';
           channelList.innerHTML = '';
           connectBtn.style.display = 'block';
           disconnectBtn.style.display = 'none';
