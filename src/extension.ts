@@ -236,8 +236,15 @@ export function activate(context: vscode.ExtensionContext) {
           vscode.window.showWarningMessage('请先打开一个 Tester 文件');
           return;
         }
-        // 设备打开由执行器在运行测试时自动处理
-        vscode.window.showInformationMessage('设备将在运行测试时自动打开');
+
+        // 打开设备用于手动发送
+        const result = await executor.openDeviceForManualSend(editor.document.uri);
+        if (result.success) {
+          vscode.window.showInformationMessage(result.message);
+          updateDeviceStatus();
+        } else {
+          vscode.window.showErrorMessage(result.message);
+        }
       }
     )
   );
@@ -247,13 +254,9 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand(
       "tester.closeDevice",
       () => {
-        executor.stopAllTasks(true);
-        deviceStatusProvider.updateStatus({
-          connected: false,
-          deviceType: '',
-          deviceIndex: 0,
-          channels: [],
-        });
+        executor.closeDeviceManually();
+        updateDeviceStatus();
+        vscode.window.showInformationMessage('设备已关闭');
       }
     )
   );

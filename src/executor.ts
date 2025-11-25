@@ -305,6 +305,45 @@ export class TesterExecutor {
   }
 
   /**
+   * 独立打开设备（用于手动发送）
+   */
+  public async openDeviceForManualSend(documentUri: vscode.Uri): Promise<{ success: boolean; message: string }> {
+    try {
+      const document = await vscode.workspace.openTextDocument(documentUri);
+      const text = document.getText();
+
+      // 解析文档获取配置
+      const parseResult = this.parser.parse(text);
+      if (!parseResult.program) {
+        return { success: false, message: '解析文件失败' };
+      }
+
+      const configuration = parseResult.program.configuration;
+      if (!configuration) {
+        return { success: false, message: '文件中缺少配置块' };
+      }
+
+      // 初始化设备
+      const initResult = await this.initializeDevice(configuration);
+      if (!initResult.success) {
+        return { success: false, message: initResult.message };
+      }
+
+      this.log("设备已打开，可以进行手动发送");
+      return { success: true, message: '设备已成功打开' };
+    } catch (error: any) {
+      return { success: false, message: `打开设备失败: ${error.message}` };
+    }
+  }
+
+  /**
+   * 关闭设备（公共方法）
+   */
+  public closeDeviceManually(): void {
+    this.stopAllTasks(true);
+  }
+
+  /**
    * 暂停所有发送任务
    */
   public pauseAllTasks(): void {
