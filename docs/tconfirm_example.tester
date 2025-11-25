@@ -1,0 +1,38 @@
+// tconfirm 命令示例
+// 用于交互式判断测试用例是否通过
+
+tset
+  tcaninit 4,0,0,500
+tend
+
+ttitle=人机交互测试示例
+
+  1 tstart=基本功能测试
+    // 发送测试报文
+    tcans 0,0x123,01-02-03-04-05-06-07-08,100,10
+    tdelay 500
+
+    // 要求用户确认LED是否点亮
+    tconfirm 请观察设备LED是否点亮？
+
+    // 继续测试
+    tdelay 1000
+    tconfirm 请确认设备是否正常响应？
+  tend
+
+  2 tstart=综合测试
+    // 发送控制命令
+    tcans 0,0x456,FF-FF-FF-FF-00-00-00-00,200,5
+    tdelay 300
+
+    // 用户确认物理现象
+    tconfirm 请确认电机是否已启动？
+
+    // 接收反馈报文
+    tcanr 0,0x457,0.0-7.7,print,1000
+
+    // 用户确认最终结果
+    tconfirm 请确认整体功能是否正常？
+  tend
+
+ttitle-end

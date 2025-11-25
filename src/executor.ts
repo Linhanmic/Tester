@@ -19,6 +19,7 @@ import {
   TcansCommand,
   TcanrCommand,
   TdelayCommand,
+  TconfirmCommand,
   ChannelConfig,
   BitRange,
 } from "./parser";
@@ -1088,6 +1089,8 @@ export class TesterExecutor {
         return await this.executeTcanr(command);
       case "tdelay":
         return await this.executeTdelay(command);
+      case "tconfirm":
+        return await this.executeTconfirm(command);
       default:
         return {
           command: "unknown",
@@ -1298,6 +1301,50 @@ export class TesterExecutor {
       message: `延时 ${command.delayMs}ms 完成`,
       line: command.line,
     };
+  }
+
+  /**
+   * 执行 tconfirm 命令（人机交互确认）
+   */
+  private async executeTconfirm(command: TconfirmCommand): Promise<CommandResult> {
+    const cmdStr = `tconfirm ${command.message}`;
+    this.log(`    > ${cmdStr}`);
+    this.log(`      等待用户确认...`);
+
+    // 弹出确认对话框
+    const result = await vscode.window.showInformationMessage(
+      command.message,
+      { modal: true },
+      "通过",
+      "失败"
+    );
+
+    if (result === "通过") {
+      this.log(`      用户确认: 通过`);
+      return {
+        command: cmdStr,
+        success: true,
+        message: "用户确认测试通过",
+        line: command.line,
+      };
+    } else if (result === "失败") {
+      this.log(`      用户确认: 失败`);
+      return {
+        command: cmdStr,
+        success: false,
+        message: "用户确认测试失败",
+        line: command.line,
+      };
+    } else {
+      // 用户关闭了对话框（ESC或点击X）
+      this.log(`      用户取消了确认`);
+      return {
+        command: cmdStr,
+        success: false,
+        message: "用户取消了确认",
+        line: command.line,
+      };
+    }
   }
 
   /**

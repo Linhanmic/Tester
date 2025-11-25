@@ -66,6 +66,13 @@ export interface TdelayCommand {
   line: number;
 }
 
+/** 人机交互确认命令 tconfirm */
+export interface TconfirmCommand {
+  type: "tconfirm";
+  message: string;
+  line: number;
+}
+
 /** 位范围定义 */
 export interface BitRange {
   startByte: number;
@@ -75,7 +82,7 @@ export interface BitRange {
 }
 
 /** 测试命令联合类型 */
-export type TestCommand = TcansCommand | TcanrCommand | TdelayCommand;
+export type TestCommand = TcansCommand | TcanrCommand | TdelayCommand | TconfirmCommand;
 
 /** 测试用例 */
 export interface TestCase {
@@ -416,6 +423,8 @@ export class TesterParser {
       return this.parseTcanrCommand(line);
     } else if (line.startsWith("tdelay")) {
       return this.parseTdelayCommand(line);
+    } else if (line.startsWith("tconfirm")) {
+      return this.parseTconfirmCommand(line);
     }
     return null;
   }
@@ -569,6 +578,25 @@ export class TesterParser {
     return {
       type: "tdelay",
       delayMs,
+      line: this.currentLine,
+    };
+  }
+
+  /**
+   * 解析 tconfirm 命令
+   * 格式: tconfirm 提示信息
+   */
+  private parseTconfirmCommand(line: string): TconfirmCommand | null {
+    const content = line.substring("tconfirm".length).trim();
+
+    if (!content) {
+      this.addError(`tconfirm 缺少提示信息`);
+      return null;
+    }
+
+    return {
+      type: "tconfirm",
+      message: content,
       line: this.currentLine,
     };
   }
