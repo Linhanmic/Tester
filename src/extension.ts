@@ -152,6 +152,36 @@ export function activate(context: vscode.ExtensionContext) {
     updateDeviceList();
   });
 
+  deviceStatusProvider.onRefreshDevice(async (configId) => {
+    const config = deviceConfigManager.get(configId);
+    if (!config) {
+      vscode.window.showErrorMessage('设备配置不存在');
+      return;
+    }
+
+    // 检查设备是否已连接
+    const deviceInfo = executor.getDeviceInfo();
+    if (deviceInfo.connected &&
+        deviceInfo.deviceType === config.deviceType.toString() &&
+        deviceInfo.deviceIndex === config.deviceIndex) {
+      vscode.window.showInformationMessage('设备已连接');
+      updateDeviceStatus();
+    } else {
+      vscode.window.showWarningMessage('设备未连接，请先打开设备');
+    }
+  });
+
+  deviceStatusProvider.onBatchConnect(async () => {
+    const configs = deviceConfigManager.getAll();
+    if (configs.length === 0) {
+      vscode.window.showWarningMessage('暂无设备配置');
+      return;
+    }
+
+    // 批量连接所有设备（这里简化实现，只连接第一个设备）
+    vscode.window.showInformationMessage('批量连接功能开发中，当前仅支持单设备连接');
+  });
+
   // 初始化时加载设备列表
   setTimeout(() => {
     updateDeviceList();
