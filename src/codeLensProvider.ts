@@ -74,8 +74,9 @@ export class TesterCodeLensProvider implements vscode.CodeLensProvider {
             }
 
             // 在测试用例集顶部添加"运行测试用例集"
-            if (line.startsWith('ttitle=')) {
-                const suiteName = line.substring(7).trim();
+            const ttitleMatch = line.match(/\bttitle\b\s*=\s*(.*)$/);
+            if (ttitleMatch) {
+                const suiteName = ttitleMatch[1].trim();
                 const range = new vscode.Range(i, 0, i, line.length);
                 this.codeLenses.push(
                     new vscode.CodeLens(range, {

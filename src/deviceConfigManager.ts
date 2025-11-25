@@ -104,13 +104,14 @@ export class DeviceConfigManager {
    * 获取所有设备配置
    */
   public getAll(): SavedDeviceConfig[] {
-    // 优先从文件读取，如果文件不存在或为空，则从GlobalState读取（用于迁移）
-    const fileConfigs = this.readConfigFile();
-    if (fileConfigs.length > 0) {
-      return fileConfigs;
+    const configPath = this.getConfigFilePath();
+
+    // 如果配置文件存在，直接从文件读取（即使是空数组也是有效的）
+    if (configPath && fs.existsSync(configPath)) {
+      return this.readConfigFile();
     }
 
-    // 从旧的GlobalState读取（用于向后兼容）
+    // 配置文件不存在时，从旧的GlobalState读取（用于向后兼容）
     const globalConfigs = this.context.globalState.get<SavedDeviceConfig[]>(DeviceConfigManager.STORAGE_KEY, []);
     if (globalConfigs.length > 0) {
       // 自动迁移到文件存储
