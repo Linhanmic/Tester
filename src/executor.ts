@@ -337,6 +337,43 @@ export class TesterExecutor {
   }
 
   /**
+   * 从保存的配置打开设备
+   */
+  public async openDeviceFromConfig(deviceType: number, deviceIndex: number, channels: Array<{ channelIndex: number; projectChannelIndex: number; arbitrationBaudrate: number; dataBaudrate?: number }>): Promise<{ success: boolean; message: string }> {
+    try {
+      // 构造ConfigurationBlock
+      const channelConfigs: ChannelConfig[] = channels.map(ch => ({
+        deviceId: deviceType,
+        deviceIndex: deviceIndex,
+        channelIndex: ch.channelIndex,
+        projectChannelIndex: ch.projectChannelIndex,
+        arbitrationBaudrate: ch.arbitrationBaudrate,
+        dataBaudrate: ch.dataBaudrate,
+      }));
+
+      const configuration: ConfigurationBlock = {
+        channels: channelConfigs,
+        diagnose: {
+          dtcList: []
+        },
+        startLine: 0,
+        endLine: 0,
+      };
+
+      // 初始化设备
+      const initResult = await this.initializeDevice(configuration);
+      if (!initResult.success) {
+        return { success: false, message: initResult.message };
+      }
+
+      this.log("设备已从配置打开，可以进行手动发送");
+      return { success: true, message: '设备已成功打开' };
+    } catch (error: any) {
+      return { success: false, message: `打开设备失败: ${error.message}` };
+    }
+  }
+
+  /**
    * 关闭设备（公共方法）
    */
   public closeDeviceManually(): void {
@@ -833,7 +870,6 @@ export class TesterExecutor {
 
     try {
       // 动态加载ZlgCanDevice
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
       this.zlgcanModule = require("./zlgcan/index.js");
       const ZlgCanDevice = this.zlgcanModule.ZlgCanDevice;
       const CanType = this.zlgcanModule.CanType;

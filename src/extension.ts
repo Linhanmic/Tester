@@ -8,6 +8,7 @@ import { TesterFormattingProvider } from "./formatting";
 import { TesterExecutor } from "./executor";
 import { DeviceStatusViewProvider, MessageMonitorViewProvider, ManualSendViewProvider } from "./views";
 import { StatusBarManager } from "./statusBar";
+import { DeviceConfigManager } from "./deviceConfigManager";
 
 // 全局诊断集合
 let diagnosticCollection: vscode.DiagnosticCollection;
@@ -64,6 +65,9 @@ export function activate(context: vscode.ExtensionContext) {
 
   // ========== 视图提供程序注册 ==========
 
+  // 创建设备配置管理器
+  const deviceConfigManager = new DeviceConfigManager(context);
+
   // 创建视图提供程序
   const deviceStatusProvider = new DeviceStatusViewProvider(context.extensionUri);
   const messageMonitorProvider = new MessageMonitorViewProvider(context.extensionUri);
@@ -73,7 +77,12 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(
       DeviceStatusViewProvider.viewType,
-      deviceStatusProvider
+      deviceStatusProvider,
+      {
+        webviewOptions: {
+          retainContextWhenHidden: true
+        }
+      }
     )
   );
 
@@ -90,6 +99,63 @@ export function activate(context: vscode.ExtensionContext) {
       manualSendProvider
     )
   );
+
+  // 设备配置列表管理
+  const updateDeviceList = () => {
+    const configs = deviceConfigManager.getAll();
+    deviceStatusProvider.updateDeviceList(configs);
+  };
+
+  // 监听设备配置操作
+  deviceStatusProvider.onOpenFromConfig(async (request) => {
+    const config = deviceConfigManager.get(request.configId);
+    if (!config) {
+      vscode.window.showErrorMessage('设备配置不存在');
+      return;
+    }
+
+    const result = await executor.openDeviceFromConfig(
+      config.deviceType,
+      config.deviceIndex,
+      config.channels
+    );
+
+    if (result.success) {
+      await deviceConfigManager.updateLastUsed(config.id);
+      vscode.window.showInformationMessage(result.message);
+      updateDeviceStatus();
+      updateDeviceList();
+    } else {
+      vscode.window.showErrorMessage(result.message);
+    }
+  });
+
+  deviceStatusProvider.onSaveConfig(async (request) => {
+    const config = {
+      id: deviceConfigManager.generateId(),
+      name: request.name,
+      deviceType: request.deviceType,
+      deviceIndex: request.deviceIndex,
+      channels: request.channels,
+      description: request.description,
+      createdAt: Date.now()
+    };
+
+    await deviceConfigManager.save(config);
+    deviceStatusProvider.showMessage(true, '设备配置已保存');
+    updateDeviceList();
+  });
+
+  deviceStatusProvider.onDeleteConfig(async (configId) => {
+    await deviceConfigManager.delete(configId);
+    deviceStatusProvider.showMessage(true, '设备配置已删除');
+    updateDeviceList();
+  });
+
+  // 初始化时加载设备列表
+  setTimeout(() => {
+    updateDeviceList();
+  }, 1000);
 
   // ========== 状态栏 ==========
 
