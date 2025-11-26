@@ -39,12 +39,6 @@ export class DeviceStatusViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'tester.deviceStatus';
 
   private _view?: vscode.WebviewView;
-  private _status: DeviceStatus = {
-    connected: false,
-    deviceType: '',
-    deviceIndex: 0,
-    channels: [],
-  };
 
   private _onOpenFromConfig: vscode.EventEmitter<OpenFromConfigRequest> = new vscode.EventEmitter<OpenFromConfigRequest>();
   public readonly onOpenFromConfig: vscode.Event<OpenFromConfigRequest> = this._onOpenFromConfig.event;
@@ -59,7 +53,7 @@ export class DeviceStatusViewProvider implements vscode.WebviewViewProvider {
 
   public resolveWebviewView(
     webviewView: vscode.WebviewView,
-    context: vscode.WebviewViewResolveContext,
+    _context: vscode.WebviewViewResolveContext,
     _token: vscode.CancellationToken
   ) {
     this._view = webviewView;
@@ -93,7 +87,6 @@ export class DeviceStatusViewProvider implements vscode.WebviewViewProvider {
   }
 
   public updateStatus(status: DeviceStatus) {
-    this._status = status;
     if (this._view) {
       this._view.webview.postMessage({ type: 'updateStatus', status });
     }
@@ -111,7 +104,7 @@ export class DeviceStatusViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private _getHtmlForWebview(webview: vscode.Webview) {
+  private _getHtmlForWebview(_webview: vscode.Webview) {
     return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>

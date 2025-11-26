@@ -6,7 +6,7 @@ export class TesterFormattingProvider
   provideDocumentFormattingEdits(
     document: vscode.TextDocument,
     options: vscode.FormattingOptions,
-    token: vscode.CancellationToken
+    _token: vscode.CancellationToken
   ): vscode.ProviderResult<vscode.TextEdit[]> {
     const edits: vscode.TextEdit[] = [];
     const text = document.getText();

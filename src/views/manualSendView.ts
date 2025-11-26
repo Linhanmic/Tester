@@ -18,7 +18,7 @@ export class ManualSendViewProvider implements vscode.WebviewViewProvider {
 
   public resolveWebviewView(
     webviewView: vscode.WebviewView,
-    context: vscode.WebviewViewResolveContext,
+    _context: vscode.WebviewViewResolveContext,
     _token: vscode.CancellationToken
   ) {
     this._view = webviewView;
@@ -49,7 +49,7 @@ export class ManualSendViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private _getHtmlForWebview(webview: vscode.Webview) {
+  private _getHtmlForWebview(_webview: vscode.Webview) {
     return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>

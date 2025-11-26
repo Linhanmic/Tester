@@ -3,8 +3,8 @@ import * as vscode from "vscode";
 export class TesterFoldingRangeProvider implements vscode.FoldingRangeProvider {
   provideFoldingRanges(
     document: vscode.TextDocument,
-    context: vscode.FoldingContext,
-    token: vscode.CancellationToken
+    _context: vscode.FoldingContext,
+    _token: vscode.CancellationToken
   ): vscode.ProviderResult<vscode.FoldingRange[]> {
     const ranges: vscode.FoldingRange[] = [];
     // 兼容不同操作系统的换行符

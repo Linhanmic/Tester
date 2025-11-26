@@ -18,7 +18,7 @@ export class TesterCodeLensProvider implements vscode.CodeLensProvider {
         this.refresh();
     }
 
-    public provideCodeLenses(document: vscode.TextDocument, token: vscode.CancellationToken): vscode.CodeLens[] | Thenable<vscode.CodeLens[]> {
+    public provideCodeLenses(document: vscode.TextDocument, _token: vscode.CancellationToken): vscode.CodeLens[] | Thenable<vscode.CodeLens[]> {
         this.codeLenses = [];
         const text = document.getText();
         const lines = text.split('\n');
@@ -107,7 +107,7 @@ export class TesterCodeLensProvider implements vscode.CodeLensProvider {
         return this.codeLenses;
     }
 
-    public resolveCodeLens(codeLens: vscode.CodeLens, token: vscode.CancellationToken): vscode.ProviderResult<vscode.CodeLens> {
+    public resolveCodeLens(codeLens: vscode.CodeLens, _token: vscode.CancellationToken): vscode.ProviderResult<vscode.CodeLens> {
         return codeLens;
     }
 

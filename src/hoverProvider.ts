@@ -4,7 +4,7 @@ export class TesterHoverProvider implements vscode.HoverProvider {
     provideHover(
         document: vscode.TextDocument,
         position: vscode.Position,
-        token: vscode.CancellationToken
+        _token: vscode.CancellationToken
     ): vscode.ProviderResult<vscode.Hover> {
         const range = document.getWordRangeAtPosition(position);
         if (!range) {

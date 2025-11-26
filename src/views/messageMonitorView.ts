@@ -27,7 +27,6 @@ export class MessageMonitorViewProvider implements vscode.WebviewViewProvider {
   private _totalCount = 0;
   private _txCount = 0;
   private _rxCount = 0;
-  private _lastUpdateTime = Date.now();
   private _statsTimer: NodeJS.Timeout | null = null;
 
   constructor(private readonly _extensionUri: vscode.Uri) {
@@ -37,9 +36,20 @@ export class MessageMonitorViewProvider implements vscode.WebviewViewProvider {
     }, 1000);
   }
 
+  public dispose() {
+    if (this._statsTimer) {
+      clearInterval(this._statsTimer);
+      this._statsTimer = null;
+    }
+    if (this._updateTimer) {
+      clearTimeout(this._updateTimer);
+      this._updateTimer = null;
+    }
+  }
+
   public resolveWebviewView(
     webviewView: vscode.WebviewView,
-    context: vscode.WebviewViewResolveContext,
+    _context: vscode.WebviewViewResolveContext,
     _token: vscode.CancellationToken
   ) {
     this._view = webviewView;
@@ -148,7 +158,7 @@ export class MessageMonitorViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private _getHtmlForWebview(webview: vscode.Webview) {
+  private _getHtmlForWebview(_webview: vscode.Webview) {
     return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
