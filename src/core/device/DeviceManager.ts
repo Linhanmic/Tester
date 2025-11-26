@@ -6,6 +6,7 @@
 import { ChannelConfig } from '../../types/parser.types';
 import { CanChannelConfig } from '../../types/device.types';
 import { Logger } from '../../utils/logger';
+import { ZlgCanDevice } from '../../zlgcan';
 
 /**
  * 设备配置哈希
@@ -20,8 +21,7 @@ export interface DeviceConfigHash {
  * 设备管理器
  */
 export class DeviceManager {
-  private device: any = null;
-  private zlgcanModule: any = null;
+  private device: ZlgCanDevice | null = null;
   private deviceInitialized: boolean = false;
   private currentConfigHash: string = "";
 
@@ -91,14 +91,6 @@ export class DeviceManager {
    */
   public async openDevice(config: ChannelConfig[]): Promise<{ success: boolean; message: string }> {
     try {
-      // 加载ZLGCAN模块
-      if (!this.zlgcanModule) {
-        const path = require('path');
-        const zlgcanPath = path.join(__dirname, '../../../zlgcan');
-        this.zlgcanModule = require(zlgcanPath);
-        this.logger.info('ZLGCAN模块已加载');
-      }
-
       // 计算配置哈希
       const configHash = this.getConfigHash(config);
 
@@ -116,7 +108,7 @@ export class DeviceManager {
 
       // 打开新设备
       const firstChannel = config[0];
-      this.device = new this.zlgcanModule.ZLGCAN();
+      this.device = new ZlgCanDevice();
       const opened = this.device.openDevice(
         firstChannel.deviceId,
         firstChannel.deviceIndex,
@@ -175,7 +167,7 @@ export class DeviceManager {
           dbitTiming: config.dataBaudrate,
         };
 
-        channelHandle = this.device.initCANFD(config.channelIndex, canfdConfig);
+        channelHandle = this.device!.initCanChannel(config.channelIndex, canfdConfig);
         this.logger.info(
           `通道 ${config.channelIndex} (项目索引 ${config.projectChannelIndex}) 初始化为 CAN-FD: ` +
           `仲裁=${config.arbitrationBaudrate}, 数据=${config.dataBaudrate}`
@@ -190,7 +182,7 @@ export class DeviceManager {
           filter: 0,
         };
 
-        channelHandle = this.device.initCAN(config.channelIndex, canConfig);
+        channelHandle = this.device!.initCanChannel(config.channelIndex, canConfig);
         this.logger.info(
           `通道 ${config.channelIndex} (项目索引 ${config.projectChannelIndex}) 初始化为 CAN: ` +
           `波特率=${config.arbitrationBaudrate}`
@@ -202,7 +194,7 @@ export class DeviceManager {
       }
 
       // 启动通道
-      const started = this.device.startCAN(channelHandle);
+      const started = this.device!.startCanChannel(channelHandle);
       if (!started) {
         throw new Error(`通道 ${config.channelIndex} 启动失败`);
       }
@@ -231,15 +223,6 @@ export class DeviceManager {
     }
 
     try {
-      // 重置通道
-      for (const channelHandle of this.channelHandles.values()) {
-        try {
-          this.device.resetCAN(channelHandle);
-        } catch (error) {
-          this.logger.error('重置通道失败', error);
-        }
-      }
-
       // 关闭设备
       this.device.closeDevice();
       this.logger.info('设备已关闭');
