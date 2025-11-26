@@ -1,3 +1,8 @@
+/**
+ * VS Code扩展入口
+ * 负责注册所有Provider和命令
+ */
+
 import * as vscode from "vscode";
 import { TesterValidator } from "./validator";
 import { TesterFoldingRangeProvider } from "./foldingProvider";
@@ -9,19 +14,35 @@ import { TesterExecutor } from "./executor";
 import { DeviceStatusViewProvider, MessageMonitorViewProvider, ManualSendViewProvider } from "./views";
 import { StatusBarManager } from "./statusBar";
 import { DeviceConfigManager } from "./deviceConfigManager";
-
-// 全局诊断集合
-let diagnosticCollection: vscode.DiagnosticCollection;
+import { showError, showInfo, showWarning } from "./utils/notification";
+import { TIMEOUTS } from "./utils/constants";
 
 export function activate(context: vscode.ExtensionContext) {
   console.log("Tester 已激活!");
 
+  // ========== 核心组件初始化 ==========
+
   // 创建诊断集合
-  diagnosticCollection = vscode.languages.createDiagnosticCollection("tester");
+  const diagnosticCollection = vscode.languages.createDiagnosticCollection("tester");
   context.subscriptions.push(diagnosticCollection);
 
   // 创建验证器
   const validator = new TesterValidator(diagnosticCollection);
+
+  // 创建执行器 (提前创建,避免变量提升问题)
+  const executor = new TesterExecutor();
+
+  // 创建代码透视提供程序
+  const codeLensProvider = new TesterCodeLensProvider();
+
+  // 创建设备配置管理器
+  const deviceConfigManager = new DeviceConfigManager(context);
+
+  // 创建状态栏管理器
+  const statusBar = new StatusBarManager();
+  context.subscriptions.push({ dispose: () => statusBar.dispose() });
+
+  // ========== 语言功能Provider注册 ==========
 
   // 注册折叠范围提供程序
   context.subscriptions.push(
@@ -44,9 +65,6 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.languages.registerHoverProvider("tester", new TesterHoverProvider())
   );
 
-  // 创建代码透视提供程序
-  const codeLensProvider = new TesterCodeLensProvider();
-
   // 注册代码透视提供程序
   context.subscriptions.push(
     vscode.languages.registerCodeLensProvider(
@@ -63,17 +81,14 @@ export function activate(context: vscode.ExtensionContext) {
     )
   );
 
-  // ========== 视图提供程序注册 ==========
-
-  // 创建设备配置管理器
-  const deviceConfigManager = new DeviceConfigManager(context);
+  // ========== 视图Provider注册 ==========
 
   // 创建视图提供程序
   const deviceStatusProvider = new DeviceStatusViewProvider(context.extensionUri);
   const messageMonitorProvider = new MessageMonitorViewProvider(context.extensionUri);
   const manualSendProvider = new ManualSendViewProvider(context.extensionUri);
 
-  // 注册视图
+  // 注册设备状态视图
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(
       DeviceStatusViewProvider.viewType,
@@ -86,6 +101,7 @@ export function activate(context: vscode.ExtensionContext) {
     )
   );
 
+  // 注册报文监视视图
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(
       MessageMonitorViewProvider.viewType,
@@ -93,6 +109,7 @@ export function activate(context: vscode.ExtensionContext) {
     )
   );
 
+  // 注册手动发送视图
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(
       ManualSendViewProvider.viewType,
@@ -100,17 +117,49 @@ export function activate(context: vscode.ExtensionContext) {
     )
   );
 
-  // 设备配置列表管理
+  // ========== 辅助函数 ==========
+
+  /**
+   * 更新设备配置列表
+   */
   const updateDeviceList = () => {
     const configs = deviceConfigManager.getAll();
     deviceStatusProvider.updateDeviceList(configs);
   };
 
-  // 监听设备配置操作
+  /**
+   * 更新设备状态视图
+   */
+  const updateDeviceStatus = () => {
+    const deviceInfo = executor.getDeviceInfo();
+    deviceStatusProvider.updateStatus({
+      connected: deviceInfo.connected,
+      deviceType: deviceInfo.deviceType,
+      deviceIndex: deviceInfo.deviceIndex,
+      channels: deviceInfo.channels.map(ch => ({
+        index: ch.deviceIndex,
+        projectIndex: ch.projectIndex,
+        baudrate: ch.baudrate,
+        dataBaudrate: ch.dataBaudrate,
+        isFD: ch.isFD,
+        running: ch.running,
+      })),
+    });
+  };
+
+  // ========== 事件监听 ==========
+
+  // 监听执行状态变更，更新CodeLens和状态栏
+  executor.onStateChange((state) => {
+    codeLensProvider.updateExecutionState(state);
+    statusBar.setRunning(state === 'running');
+  });
+
+  // 监听设备状态视图的事件
   deviceStatusProvider.onOpenFromConfig(async (request) => {
     const config = deviceConfigManager.get(request.configId);
     if (!config) {
-      vscode.window.showErrorMessage('设备配置不存在');
+      showError('设备配置不存在');
       return;
     }
 
@@ -122,11 +171,11 @@ export function activate(context: vscode.ExtensionContext) {
 
     if (result.success) {
       await deviceConfigManager.updateLastUsed(config.id);
-      vscode.window.showInformationMessage(result.message);
+      showInfo(result.message);
       updateDeviceStatus();
       updateDeviceList();
     } else {
-      vscode.window.showErrorMessage(result.message);
+      showError(result.message);
     }
   });
 
@@ -151,212 +200,6 @@ export function activate(context: vscode.ExtensionContext) {
     deviceStatusProvider.showMessage(true, '设备配置已删除');
     updateDeviceList();
   });
-
-  // 初始化时加载设备列表
-  setTimeout(() => {
-    updateDeviceList();
-  }, 1000);
-
-  // ========== 状态栏 ==========
-
-  const statusBar = new StatusBarManager();
-  context.subscriptions.push({ dispose: () => statusBar.dispose() });
-
-  // 注册显示测试输出命令
-  context.subscriptions.push(
-    vscode.commands.registerCommand(
-      "tester.showTestOutput",
-      () => {
-        executor.getOutputChannel().show();
-      }
-    )
-  );
-
-  // ========== CodeLens 命令注册 ==========
-
-  // 创建执行器实例
-  const executor = new TesterExecutor();
-
-  // 监听执行状态变更，更新CodeLens和状态栏
-  executor.onStateChange((state) => {
-    codeLensProvider.updateExecutionState(state);
-    statusBar.setRunning(state === 'running');
-  });
-
-  // 辅助函数：更新设备状态视图
-  const updateDeviceStatus = () => {
-    const deviceInfo = executor.getDeviceInfo();
-    deviceStatusProvider.updateStatus({
-      connected: deviceInfo.connected,
-      deviceType: deviceInfo.deviceType,
-      deviceIndex: deviceInfo.deviceIndex,
-      channels: deviceInfo.channels.map(ch => ({
-        index: ch.deviceIndex,
-        projectIndex: ch.projectIndex,
-        baudrate: ch.baudrate,
-        dataBaudrate: ch.dataBaudrate,
-        isFD: ch.isFD,
-        running: ch.running,
-      })),
-    });
-  };
-
-  // 注册运行全部测试命令
-  context.subscriptions.push(
-    vscode.commands.registerCommand(
-      "tester.runAllTests",
-      async (documentUri: vscode.Uri) => {
-        statusBar.reset();
-        const result = await executor.runAllTests(documentUri);
-        statusBar.updateResult({
-          passed: result.totalPassed,
-          failed: result.totalFailed,
-          total: result.totalPassed + result.totalFailed,
-          running: false
-        });
-        updateDeviceStatus();
-      }
-    )
-  );
-
-  // 注册运行测试用例集命令
-  context.subscriptions.push(
-    vscode.commands.registerCommand(
-      "tester.runTestSuiteByLine",
-      async (documentUri: vscode.Uri, lineNumber: number, suiteName: string) => {
-        statusBar.reset();
-        const result = await executor.runTestSuiteByLine(documentUri, lineNumber, suiteName);
-        statusBar.updateResult({
-          passed: result.passed,
-          failed: result.failed,
-          total: result.passed + result.failed,
-          running: false
-        });
-        updateDeviceStatus();
-      }
-    )
-  );
-
-  // 注册运行单个测试用例命令
-  context.subscriptions.push(
-    vscode.commands.registerCommand(
-      "tester.runTestCaseByLine",
-      async (documentUri: vscode.Uri, lineNumber: number, caseName: string) => {
-        statusBar.reset();
-        const result = await executor.runTestCaseByLine(documentUri, lineNumber, caseName);
-        statusBar.updateResult({
-          passed: result.success ? 1 : 0,
-          failed: result.success ? 0 : 1,
-          total: 1,
-          running: false
-        });
-        updateDeviceStatus();
-      }
-    )
-  );
-
-  // 注册暂停执行命令
-  context.subscriptions.push(
-    vscode.commands.registerCommand(
-      "tester.pauseExecution",
-      () => {
-        executor.pauseAllTasks();
-      }
-    )
-  );
-
-  // 注册继续执行命令
-  context.subscriptions.push(
-    vscode.commands.registerCommand(
-      "tester.resumeExecution",
-      () => {
-        executor.resumeAllTasks();
-      }
-    )
-  );
-
-  // 注册停止执行命令（同时关闭设备）
-  context.subscriptions.push(
-    vscode.commands.registerCommand(
-      "tester.stopExecution",
-      () => {
-        executor.stopAllTasks(true);
-        deviceStatusProvider.updateStatus({
-          connected: false,
-          deviceType: '',
-          deviceIndex: 0,
-          channels: [],
-        });
-      }
-    )
-  );
-
-  // 注册打开设备命令
-  context.subscriptions.push(
-    vscode.commands.registerCommand(
-      "tester.openDevice",
-      async () => {
-        // 获取当前活动编辑器的文档
-        const editor = vscode.window.activeTextEditor;
-        if (!editor || editor.document.languageId !== 'tester') {
-          vscode.window.showWarningMessage('请先打开一个 Tester 文件');
-          return;
-        }
-
-        // 打开设备用于手动发送
-        const result = await executor.openDeviceForManualSend(editor.document.uri);
-        if (result.success) {
-          vscode.window.showInformationMessage(result.message);
-          updateDeviceStatus();
-        } else {
-          vscode.window.showErrorMessage(result.message);
-        }
-      }
-    )
-  );
-
-  // 注册关闭设备命令
-  context.subscriptions.push(
-    vscode.commands.registerCommand(
-      "tester.closeDevice",
-      () => {
-        executor.closeDeviceManually();
-        updateDeviceStatus();
-        vscode.window.showInformationMessage('设备已关闭');
-      }
-    )
-  );
-
-  // 注册切换监视模式命令
-  context.subscriptions.push(
-    vscode.commands.registerCommand(
-      "tester.toggleMonitorMode",
-      () => {
-        messageMonitorProvider.toggleMode();
-      }
-    )
-  );
-
-  // 注册清空报文命令
-  context.subscriptions.push(
-    vscode.commands.registerCommand(
-      "tester.clearMessages",
-      () => {
-        messageMonitorProvider.clearMessages();
-      }
-    )
-  );
-
-  // 注册发送报文命令
-  context.subscriptions.push(
-    vscode.commands.registerCommand(
-      "tester.sendMessage",
-      () => {
-        // 手动发送通过 ManualSendViewProvider 的 webview 处理
-        vscode.window.showInformationMessage('请使用侧边栏的手动发送视图');
-      }
-    )
-  );
 
   // 监听手动发送请求
   manualSendProvider.onSendMessage(async (request) => {
@@ -395,9 +238,180 @@ export function activate(context: vscode.ExtensionContext) {
     });
   });
 
+  // 初始化时加载设备列表 (使用常量替代硬编码)
+  setTimeout(() => {
+    updateDeviceList();
+  }, TIMEOUTS.DEVICE_INIT_DELAY_MS);
+
+  // ========== 命令注册 ==========
+
+  // 显示测试输出
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "tester.showTestOutput",
+      () => {
+        executor.getOutputChannel().show();
+      }
+    )
+  );
+
+  // 运行全部测试
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "tester.runAllTests",
+      async (documentUri: vscode.Uri) => {
+        statusBar.reset();
+        const result = await executor.runAllTests(documentUri);
+        statusBar.updateResult({
+          passed: result.totalPassed,
+          failed: result.totalFailed,
+          total: result.totalPassed + result.totalFailed,
+          running: false
+        });
+        updateDeviceStatus();
+      }
+    )
+  );
+
+  // 运行测试用例集
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "tester.runTestSuiteByLine",
+      async (documentUri: vscode.Uri, lineNumber: number, suiteName: string) => {
+        statusBar.reset();
+        const result = await executor.runTestSuiteByLine(documentUri, lineNumber, suiteName);
+        statusBar.updateResult({
+          passed: result.passed,
+          failed: result.failed,
+          total: result.passed + result.failed,
+          running: false
+        });
+        updateDeviceStatus();
+      }
+    )
+  );
+
+  // 运行单个测试用例
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "tester.runTestCaseByLine",
+      async (documentUri: vscode.Uri, lineNumber: number, caseName: string) => {
+        statusBar.reset();
+        const result = await executor.runTestCaseByLine(documentUri, lineNumber, caseName);
+        statusBar.updateResult({
+          passed: result.success ? 1 : 0,
+          failed: result.success ? 0 : 1,
+          total: 1,
+          running: false
+        });
+        updateDeviceStatus();
+      }
+    )
+  );
+
+  // 暂停执行
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "tester.pauseExecution",
+      () => {
+        executor.pauseAllTasks();
+      }
+    )
+  );
+
+  // 继续执行
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "tester.resumeExecution",
+      () => {
+        executor.resumeAllTasks();
+      }
+    )
+  );
+
+  // 停止执行(同时关闭设备)
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "tester.stopExecution",
+      () => {
+        executor.stopAllTasks(true);
+        deviceStatusProvider.updateStatus({
+          connected: false,
+          deviceType: '',
+          deviceIndex: 0,
+          channels: [],
+        });
+      }
+    )
+  );
+
+  // 打开设备
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "tester.openDevice",
+      async () => {
+        const editor = vscode.window.activeTextEditor;
+        if (!editor || editor.document.languageId !== 'tester') {
+          showWarning('请先打开一个 Tester 文件');
+          return;
+        }
+
+        const result = await executor.openDeviceForManualSend(editor.document.uri);
+        if (result.success) {
+          showInfo(result.message);
+          updateDeviceStatus();
+        } else {
+          showError(result.message);
+        }
+      }
+    )
+  );
+
+  // 关闭设备
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "tester.closeDevice",
+      () => {
+        executor.closeDeviceManually();
+        updateDeviceStatus();
+        showInfo('设备已关闭');
+      }
+    )
+  );
+
+  // 切换监视模式
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "tester.toggleMonitorMode",
+      () => {
+        messageMonitorProvider.toggleMode();
+      }
+    )
+  );
+
+  // 清空报文
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "tester.clearMessages",
+      () => {
+        messageMonitorProvider.clearMessages();
+      }
+    )
+  );
+
+  // 发送报文(提示使用侧边栏)
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "tester.sendMessage",
+      () => {
+        showInfo('请使用侧边栏的手动发送视图');
+      }
+    )
+  );
+
   // ========== 文档事件监听 ==========
 
-  // 文档打开时验证
+  // 已打开的文档验证
   vscode.workspace.textDocuments.forEach((doc) => {
     if (doc.languageId === "tester") {
       validator.validateDocument(doc);
@@ -413,7 +427,7 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  // 文档打开时验证和刷新视图
+  // 文档打开时验证
   context.subscriptions.push(
     vscode.workspace.onDidOpenTextDocument((doc) => {
       if (doc.languageId === "tester") {
@@ -431,8 +445,12 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  vscode.window.showInformationMessage("Tester Language Support 已加载！");
+  showInfo("Tester Language Support 已加载！");
 }
 
-// This method is called when your extension is deactivated
-export function deactivate() {}
+/**
+ * 扩展停用时调用
+ */
+export function deactivate() {
+  // 清理资源
+}
