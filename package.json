@@ -139,6 +139,11 @@
         "command": "tester.sendMessage",
         "title": "Tester: 发送报文",
         "icon": "$(arrow-right)"
+      },
+      {
+        "command": "tester.convertToRawScript",
+        "title": "Tester: 转换为原始指令脚本",
+        "icon": "$(symbol-keyword)"
       }
     ]
   },

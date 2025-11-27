@@ -9,6 +9,7 @@ import { TesterExecutor } from "./executor";
 import { DeviceStatusViewProvider, MessageMonitorViewProvider, ManualSendViewProvider } from "./views";
 import { StatusBarManager } from "./statusBar";
 import { DeviceConfigManager } from "./deviceConfigManager";
+import { ScriptConverter } from "./converter";
 
 // 全局诊断集合
 let diagnosticCollection: vscode.DiagnosticCollection;
@@ -354,6 +355,42 @@ export function activate(context: vscode.ExtensionContext) {
       () => {
         // 手动发送通过 ManualSendViewProvider 的 webview 处理
         vscode.window.showInformationMessage('请使用侧边栏的手动发送视图');
+      }
+    )
+  );
+
+  // 注册脚本转换命令
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "tester.convertToRawScript",
+      async () => {
+        const editor = vscode.window.activeTextEditor;
+        if (!editor || editor.document.languageId !== 'tester') {
+          vscode.window.showWarningMessage('请先打开一个 Tester 文件');
+          return;
+        }
+
+        try {
+          const converter = new ScriptConverter();
+          const sourceText = editor.document.getText();
+          const convertedText = converter.convert(sourceText);
+
+          // 创建新文档显示转换结果
+          const doc = await vscode.workspace.openTextDocument({
+            content: convertedText,
+            language: 'tester'
+          });
+
+          await vscode.window.showTextDocument(doc, {
+            viewColumn: vscode.ViewColumn.Beside,
+            preview: false
+          });
+
+          vscode.window.showInformationMessage('脚本已成功转换为原始指令格式');
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          vscode.window.showErrorMessage(`转换失败: ${errorMessage}`);
+        }
       }
     )
   );
