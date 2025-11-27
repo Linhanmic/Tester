@@ -29,6 +29,29 @@ export interface DtcConfig {
   description: string;
 }
 
+/** 枚举定义 */
+export interface EnumDefinition {
+  name: string;
+  values: Map<number, string>; // 数值 -> 名称映射
+  line: number;
+}
+
+/** 位域映射 */
+export interface BitFieldMapping {
+  bitRange: BitRange;
+  paramName: string; // 对应的参数名
+  scale?: number; // 缩放因子 (例如: /100 表示 scale=100)
+}
+
+/** 位域函数定义 */
+export interface BitFieldFunction {
+  name: string;
+  parameters: Map<string, string>; // 参数名 -> 显示名映射
+  canId: number;
+  mappings: BitFieldMapping[];
+  line: number;
+}
+
 /** 配置块 */
 export interface ConfigurationBlock {
   channels: ChannelConfig[];
@@ -73,6 +96,14 @@ export interface TconfirmCommand {
   line: number;
 }
 
+/** 位域函数调用命令 */
+export interface BitFieldCallCommand {
+  type: "bitfield_call";
+  functionName: string;
+  arguments: Map<string, number | string>; // 参数名 -> 值
+  line: number;
+}
+
 /** 位范围定义 */
 export interface BitRange {
   startByte: number;
@@ -82,7 +113,7 @@ export interface BitRange {
 }
 
 /** 测试命令联合类型 */
-export type TestCommand = TcansCommand | TcanrCommand | TdelayCommand | TconfirmCommand;
+export type TestCommand = TcansCommand | TcanrCommand | TdelayCommand | TconfirmCommand | BitFieldCallCommand;
 
 /** 测试用例 */
 export interface TestCase {
@@ -104,6 +135,8 @@ export interface TestSuite {
 /** 解析后的程序结构 */
 export interface TesterProgram {
   configuration?: ConfigurationBlock;
+  enums: Map<string, EnumDefinition>; // 枚举定义
+  bitFieldFunctions: Map<string, BitFieldFunction>; // 位域函数定义
   testSuites: TestSuite[];
 }
 
@@ -125,6 +158,7 @@ export class TesterParser {
   private lines: string[] = [];
   private currentLine: number = 0;
   private errors: ParseError[] = [];
+  private currentProgram: TesterProgram | null = null; // 当前解析的程序
 
   /**
    * 解析整个文档
@@ -135,8 +169,11 @@ export class TesterParser {
     this.errors = [];
 
     const program: TesterProgram = {
+      enums: new Map(),
+      bitFieldFunctions: new Map(),
       testSuites: [],
     };
+    this.currentProgram = program;
 
     while (this.currentLine < this.lines.length) {
       const line = this.getCurrentLineContent();
@@ -147,6 +184,26 @@ export class TesterParser {
         } else {
           program.configuration = this.parseConfigurationBlock();
         }
+      } else if (line.startsWith("tenum ")) {
+        const enumDef = this.parseEnumDefinition(line);
+        if (enumDef) {
+          if (program.enums.has(enumDef.name)) {
+            this.addError(`枚举 "${enumDef.name}" 重复定义`);
+          } else {
+            program.enums.set(enumDef.name, enumDef);
+          }
+        }
+        this.currentLine++;
+      } else if (line.startsWith("tbitfield ")) {
+        const funcDef = this.parseBitFieldFunction(line);
+        if (funcDef) {
+          if (program.bitFieldFunctions.has(funcDef.name)) {
+            this.addError(`位域函数 "${funcDef.name}" 重复定义`);
+          } else {
+            program.bitFieldFunctions.set(funcDef.name, funcDef);
+          }
+        }
+        this.currentLine++;
       } else if (line.startsWith("ttitle=") || line.startsWith("ttitle =")) {
         const suite = this.parseTestSuite();
         if (suite) {
@@ -156,6 +213,8 @@ export class TesterParser {
         this.currentLine++;
       }
     }
+
+    this.currentProgram = null;
 
     return {
       program: this.errors.length === 0 ? program : undefined,
@@ -330,6 +389,182 @@ export class TesterParser {
   }
 
   /**
+   * 解析枚举定义
+   * 格式: tenum 枚举名 值1=键1, 值2=键2, ...
+   * 示例: tenum 车速单位 0=km/h, 1=mph, 2=m/s
+   */
+  private parseEnumDefinition(line: string): EnumDefinition | null {
+    const content = line.substring("tenum".length).trim();
+    const parts = content.split(/\s+/);
+
+    if (parts.length < 2) {
+      this.addError("tenum 格式错误，缺少枚举名或枚举值");
+      return null;
+    }
+
+    const enumName = parts[0];
+    const valuesStr = parts.slice(1).join(" ");
+    const valuePairs = valuesStr.split(",").map(p => p.trim());
+
+    const values = new Map<number, string>();
+    for (const pair of valuePairs) {
+      const eqIndex = pair.indexOf("=");
+      if (eqIndex === -1) {
+        this.addError(`枚举值格式错误: ${pair}`);
+        continue;
+      }
+
+      const numStr = pair.substring(0, eqIndex).trim();
+      const nameStr = pair.substring(eqIndex + 1).trim();
+      const num = parseInt(numStr, 10);
+
+      if (isNaN(num)) {
+        this.addError(`枚举值不是有效数字: ${numStr}`);
+        continue;
+      }
+
+      values.set(num, nameStr);
+    }
+
+    return {
+      name: enumName,
+      values,
+      line: this.currentLine,
+    };
+  }
+
+  /**
+   * 解析位域函数定义
+   * 格式: tbitfield 函数名 参数1="显示名1", 参数2="显示名2": CAN_ID, 位域1="参数1"/缩放, 位域2="参数2"
+   * 示例: tbitfield 车速 车速值="车速值", 车速单位="车速单位": 144, 1.0-2.7="车速值"/100, 3.0-3.1="车速单位"
+   */
+  private parseBitFieldFunction(line: string): BitFieldFunction | null {
+    const content = line.substring("tbitfield".length).trim();
+
+    // 找到冒号位置，分割参数定义和位域映射
+    const colonIndex = content.indexOf(":");
+    if (colonIndex === -1) {
+      this.addError("tbitfield 格式错误，缺少冒号分隔符");
+      return null;
+    }
+
+    const paramSection = content.substring(0, colonIndex).trim();
+    const mappingSection = content.substring(colonIndex + 1).trim();
+
+    // 解析函数名和参数
+    const paramParts = paramSection.split(/\s+/);
+    if (paramParts.length < 2) {
+      this.addError("tbitfield 格式错误，缺少函数名或参数");
+      return null;
+    }
+
+    const funcName = paramParts[0];
+    const paramsStr = paramParts.slice(1).join(" ");
+    const paramPairs = paramsStr.split(",").map(p => p.trim());
+
+    const parameters = new Map<string, string>();
+    for (const pair of paramPairs) {
+      const eqIndex = pair.indexOf("=");
+      if (eqIndex === -1) {
+        this.addError(`参数格式错误: ${pair}`);
+        continue;
+      }
+
+      const paramName = pair.substring(0, eqIndex).trim();
+      let displayName = pair.substring(eqIndex + 1).trim();
+
+      // 移除引号
+      if ((displayName.startsWith('"') && displayName.endsWith('"')) ||
+          (displayName.startsWith("'") && displayName.endsWith("'"))) {
+        displayName = displayName.substring(1, displayName.length - 1);
+      }
+
+      parameters.set(paramName, displayName);
+    }
+
+    // 解析CAN ID和位域映射
+    const mappingParts = mappingSection.split(",").map(p => p.trim());
+    if (mappingParts.length < 2) {
+      this.addError("tbitfield 格式错误，缺少CAN ID或位域映射");
+      return null;
+    }
+
+    const canId = this.parseHexValueDefaultHex(mappingParts[0]);
+    if (canId === null) {
+      this.addError(`无效的CAN ID: ${mappingParts[0]}`);
+      return null;
+    }
+
+    const mappings: BitFieldMapping[] = [];
+    for (let i = 1; i < mappingParts.length; i++) {
+      const mappingStr = mappingParts[i];
+      const mapping = this.parseBitFieldMapping(mappingStr);
+      if (mapping) {
+        mappings.push(mapping);
+      }
+    }
+
+    return {
+      name: funcName,
+      parameters,
+      canId,
+      mappings,
+      line: this.currentLine,
+    };
+  }
+
+  /**
+   * 解析位域映射
+   * 格式: 位域="参数名"/缩放
+   * 示例: 1.0-2.7="车速值"/100
+   */
+  private parseBitFieldMapping(str: string): BitFieldMapping | null {
+    // 找到等号位置
+    const eqIndex = str.indexOf("=");
+    if (eqIndex === -1) {
+      this.addError(`位域映射格式错误: ${str}`);
+      return null;
+    }
+
+    const bitRangeStr = str.substring(0, eqIndex).trim();
+    let valueStr = str.substring(eqIndex + 1).trim();
+
+    // 提取参数名和缩放因子
+    let paramName = valueStr;
+    let scale: number | undefined;
+
+    // 移除引号
+    if ((paramName.startsWith('"') && paramName.includes('"', 1)) ||
+        (paramName.startsWith("'") && paramName.includes("'", 1))) {
+      const closeQuoteIndex = paramName.indexOf(paramName[0], 1);
+      paramName = paramName.substring(1, closeQuoteIndex);
+
+      // 检查是否有缩放因子
+      const remainder = valueStr.substring(closeQuoteIndex + 1).trim();
+      if (remainder.startsWith("/")) {
+        const scaleStr = remainder.substring(1).trim();
+        scale = parseInt(scaleStr, 10);
+        if (isNaN(scale)) {
+          this.addError(`无效的缩放因子: ${scaleStr}`);
+          scale = undefined;
+        }
+      }
+    }
+
+    // 解析位范围
+    const bitRange = this.parseSingleBitRange(bitRangeStr);
+    if (!bitRange) {
+      return null;
+    }
+
+    return {
+      bitRange,
+      paramName,
+      scale,
+    };
+  }
+
+  /**
    * 解析测试用例集
    */
   private parseTestSuite(): TestSuite | null {
@@ -425,8 +660,76 @@ export class TesterParser {
       return this.parseTdelayCommand(line);
     } else if (line.startsWith("tconfirm")) {
       return this.parseTconfirmCommand(line);
+    } else if (this.currentProgram) {
+      // 尝试匹配位域函数调用
+      const funcCall = this.parseBitFieldCall(line);
+      if (funcCall) {
+        return funcCall;
+      }
     }
     return null;
+  }
+
+  /**
+   * 解析位域函数调用
+   * 格式: 函数名 参数1=值1, 参数2=值2, ...
+   * 示例: 车速 车速值=100, 车速单位=km/h
+   */
+  private parseBitFieldCall(line: string): BitFieldCallCommand | null {
+    if (!this.currentProgram) {
+      return null;
+    }
+
+    // 提取函数名（第一个空格之前的内容）
+    const spaceIndex = line.indexOf(" ");
+    if (spaceIndex === -1) {
+      return null;
+    }
+
+    const funcName = line.substring(0, spaceIndex).trim();
+    const argsStr = line.substring(spaceIndex + 1).trim();
+
+    // 检查是否存在这个位域函数定义
+    const funcDef = this.currentProgram.bitFieldFunctions.get(funcName);
+    if (!funcDef) {
+      return null; // 不是位域函数调用
+    }
+
+    // 解析参数
+    const argPairs = argsStr.split(",").map(p => p.trim());
+    const args = new Map<string, number | string>();
+
+    for (const pair of argPairs) {
+      const eqIndex = pair.indexOf("=");
+      if (eqIndex === -1) {
+        this.addError(`参数格式错误: ${pair}`);
+        continue;
+      }
+
+      const paramName = pair.substring(0, eqIndex).trim();
+      const valueStr = pair.substring(eqIndex + 1).trim();
+
+      // 检查参数是否在函数定义中
+      if (!funcDef.parameters.has(paramName)) {
+        this.addError(`未定义的参数: ${paramName}`);
+        continue;
+      }
+
+      // 尝试解析为数字，如果失败则保存为字符串（枚举值）
+      const numValue = parseFloat(valueStr);
+      if (!isNaN(numValue)) {
+        args.set(paramName, numValue);
+      } else {
+        args.set(paramName, valueStr);
+      }
+    }
+
+    return {
+      type: "bitfield_call",
+      functionName: funcName,
+      arguments: args,
+      line: this.currentLine,
+    };
   }
 
   /**

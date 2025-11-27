@@ -20,8 +20,13 @@ import {
   TcanrCommand,
   TdelayCommand,
   TconfirmCommand,
+  BitFieldCallCommand,
   ChannelConfig,
   BitRange,
+  EnumDefinition,
+  BitFieldFunction,
+  BitFieldMapping,
+  TesterProgram,
 } from "./parser";
 
 // CAN设备相关类型
@@ -181,6 +186,10 @@ export class TesterExecutor {
   // 设备是否已初始化
   private deviceInitialized: boolean = false;
   private currentConfigHash: string = "";
+
+  // 程序定义（枚举和位域函数）
+  private enums: Map<string, EnumDefinition> = new Map();
+  private bitFieldFunctions: Map<string, BitFieldFunction> = new Map();
 
   // ZLG CAN 模块引用
   private zlgcanModule: any = null;
@@ -614,6 +623,10 @@ export class TesterExecutor {
 
     const program = parseResult.program;
 
+    // 存储枚举和位域函数定义
+    this.enums = program.enums;
+    this.bitFieldFunctions = program.bitFieldFunctions;
+
     // 初始化设备（必须成功）
     if (program.configuration) {
       const initResult = await this.initializeDevice(program.configuration);
@@ -686,6 +699,12 @@ export class TesterExecutor {
     // 首先解析整个文档获取配置
     const fullParseResult = this.parser.parse(text);
     const configuration = fullParseResult.program?.configuration;
+
+    // 存储枚举和位域函数定义
+    if (fullParseResult.program) {
+      this.enums = fullParseResult.program.enums;
+      this.bitFieldFunctions = fullParseResult.program.bitFieldFunctions;
+    }
 
     // 解析指定行的测试用例集
     const suite = this.parser.parseTestSuiteAtLine(text, lineNumber);
@@ -768,6 +787,13 @@ export class TesterExecutor {
     this.log("========================================\n");
 
     const startTime = Date.now();
+
+    // 首先解析整个文档以获取枚举和位域函数定义
+    const fullParseResult = this.parser.parse(text);
+    if (fullParseResult.program) {
+      this.enums = fullParseResult.program.enums;
+      this.bitFieldFunctions = fullParseResult.program.bitFieldFunctions;
+    }
 
     // 解析测试用例和配置
     const parseResult = this.parser.parseTestCaseAtLine(text, lineNumber);
@@ -1097,6 +1123,8 @@ export class TesterExecutor {
         return await this.executeTdelay(command);
       case "tconfirm":
         return await this.executeTconfirm(command);
+      case "bitfield_call":
+        return await this.executeBitFieldCall(command);
       default:
         return {
           command: "unknown",
@@ -1104,6 +1132,126 @@ export class TesterExecutor {
           message: "未知命令类型",
           line: 0,
         };
+    }
+  }
+
+  /**
+   * 执行位域函数调用
+   * 将位域函数调用转换为CAN报文并发送
+   */
+  private async executeBitFieldCall(command: BitFieldCallCommand): Promise<CommandResult> {
+    const funcDef = this.bitFieldFunctions.get(command.functionName);
+    if (!funcDef) {
+      return {
+        command: command.functionName,
+        success: false,
+        message: `未定义的位域函数: ${command.functionName}`,
+        line: command.line,
+      };
+    }
+
+    // 初始化8字节数据
+    const data = new Array(8).fill(0);
+
+    // 遍历每个位域映射
+    for (const mapping of funcDef.mappings) {
+      const argValue = command.arguments.get(mapping.paramName);
+      if (argValue === undefined) {
+        return {
+          command: command.functionName,
+          success: false,
+          message: `缺少参数: ${mapping.paramName}`,
+          line: command.line,
+        };
+      }
+
+      // 处理值
+      let numValue: number = 0;
+      if (typeof argValue === "string") {
+        // 尝试从枚举中查找值
+        let found = false;
+        for (const [enumName, enumDef] of this.enums) {
+          for (const [num, name] of enumDef.values) {
+            if (name === argValue) {
+              numValue = num;
+              found = true;
+              break;
+            }
+          }
+          if (found) break;
+        }
+        if (!found) {
+          return {
+            command: command.functionName,
+            success: false,
+            message: `未找到枚举值: ${argValue}`,
+            line: command.line,
+          };
+        }
+      } else {
+        numValue = argValue;
+      }
+
+      // 应用缩放因子
+      if (mapping.scale) {
+        numValue = Math.round(numValue * mapping.scale);
+      }
+
+      // 将值写入位域
+      this.writeBitRange(data, mapping.bitRange, numValue);
+    }
+
+    // 构造tcans命令并执行
+    const tcansCommand: TcansCommand = {
+      type: "tcans",
+      channelIndex: 0, // 默认通道0
+      messageId: funcDef.canId,
+      data: data,
+      intervalMs: 0, // 单次发送
+      repeatCount: 1,
+      line: command.line,
+    };
+
+    const argsStr = Array.from(command.arguments.entries())
+      .map(([k, v]) => `${k}=${v}`)
+      .join(", ");
+    const cmdStr = `${command.functionName} ${argsStr}`;
+    this.log(`    > ${cmdStr}`);
+
+    return await this.executeTcans(tcansCommand);
+  }
+
+  /**
+   * 将值写入位域
+   */
+  private writeBitRange(data: number[], range: BitRange, value: number): void {
+    const startByte = range.startByte - 1; // 转换为0基索引
+    const startBit = range.startBit;
+    const endByte = range.endByte - 1;
+    const endBit = range.endBit;
+
+    // 计算信号长度
+    const signalLength = (endByte - startByte) * 8 + (endBit - startBit) + 1;
+
+    // Intel字节序：低位字节在前
+    let currentBitPos = startByte * 8 + startBit;
+
+    for (let i = 0; i < signalLength; i++) {
+      // 检查当前信号位是否为1
+      if (value & (1 << i)) {
+        // 计算在CAN数据中的字节和位位置
+        const byteIdx = Math.floor(currentBitPos / 8);
+        const bitIdx = currentBitPos % 8;
+
+        if (byteIdx >= 8) {
+          throw new Error(`位位置超出8字节范围: ${byteIdx}`);
+        }
+
+        // 设置对应位为1
+        data[byteIdx] |= (1 << bitIdx);
+      }
+
+      currentBitPos++;
     }
   }
 
