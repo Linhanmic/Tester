@@ -1178,7 +1178,9 @@ export class TesterExecutor {
               break;
             }
           }
-          if (found) break;
+          if (found) {
+            break;
+          }
         }
         if (!found) {
           return {
