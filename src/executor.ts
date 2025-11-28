@@ -1137,7 +1137,7 @@ export class TesterExecutor {
 
   /**
    * 执行位域函数调用
-   * 将位域函数调用转换为CAN报文并发送
+   * 将位域函数调用转换为CAN报文并发送（支持多个CAN报文）
    */
   private async executeBitFieldCall(command: BitFieldCallCommand): Promise<CommandResult> {
     const funcDef = this.bitFieldFunctions.get(command.functionName);
@@ -1150,77 +1150,90 @@ export class TesterExecutor {
       };
     }
 
-    // 初始化8字节数据
-    const data = new Array(8).fill(0);
-
-    // 遍历每个位域映射
-    for (const mapping of funcDef.mappings) {
-      const argValue = command.arguments.get(mapping.paramName);
-      if (argValue === undefined) {
-        return {
-          command: command.functionName,
-          success: false,
-          message: `缺少参数: ${mapping.paramName}`,
-          line: command.line,
-        };
-      }
-
-      // 处理值
-      let numValue: number = 0;
-      if (typeof argValue === "string") {
-        // 尝试从枚举中查找值
-        let found = false;
-        for (const [enumName, enumDef] of this.enums) {
-          for (const [num, name] of enumDef.values) {
-            if (name === argValue) {
-              numValue = num;
-              found = true;
-              break;
-            }
-          }
-          if (found) {
-            break;
-          }
-        }
-        if (!found) {
-          return {
-            command: command.functionName,
-            success: false,
-            message: `未找到枚举值: ${argValue}`,
-            line: command.line,
-          };
-        }
-      } else {
-        numValue = argValue;
-      }
-
-      // 应用缩放因子
-      if (mapping.scale) {
-        numValue = Math.round(numValue * mapping.scale);
-      }
-
-      // 将值写入位域
-      this.writeBitRange(data, mapping.bitRange, numValue);
-    }
-
-    // 构造tcans命令并执行
-    const tcansCommand: TcansCommand = {
-      type: "tcans",
-      channelIndex: 0, // 默认通道0
-      messageId: funcDef.canId,
-      data: data,
-      intervalMs: 0, // 单次发送
-      repeatCount: 1,
-      line: command.line,
-    };
-
     const argsStr = Array.from(command.arguments.entries())
       .map(([k, v]) => `${k}=${v}`)
       .join(", ");
     const cmdStr = `${command.functionName} ${argsStr}`;
     this.log(`    > ${cmdStr}`);
 
-    return await this.executeTcans(tcansCommand);
+    // 遍历每个CAN报文映射
+    const results: CommandResult[] = [];
+    for (const message of funcDef.messages) {
+      // 初始化8字节数据
+      const data = new Array(8).fill(0);
+
+      // 遍历该报文的每个位域映射
+      for (const mapping of message.mappings) {
+        const argValue = command.arguments.get(mapping.paramName);
+        if (argValue === undefined) {
+          return {
+            command: command.functionName,
+            success: false,
+            message: `缺少参数: ${mapping.paramName}`,
+            line: command.line,
+          };
+        }
+
+        // 处理值
+        let numValue: number = 0;
+        if (typeof argValue === "string") {
+          // 尝试从枚举中查找值
+          let found = false;
+          for (const [enumName, enumDef] of this.enums) {
+            for (const [num, name] of enumDef.values) {
+              if (name === argValue) {
+                numValue = num;
+                found = true;
+                break;
+              }
+            }
+            if (found) {
+              break;
+            }
+          }
+          if (!found) {
+            return {
+              command: command.functionName,
+              success: false,
+              message: `未找到枚举值: ${argValue}`,
+              line: command.line,
+            };
+          }
+        } else {
+          numValue = argValue;
+        }
+
+        // 应用缩放因子
+        if (mapping.scale) {
+          numValue = Math.round(numValue * mapping.scale);
+        }
+
+        // 将值写入位域
+        this.writeBitRange(data, mapping.bitRange, numValue);
+      }
+
+      // 构造tcans命令并执行
+      const tcansCommand: TcansCommand = {
+        type: "tcans",
+        channelIndex: 0, // 默认通道0
+        messageId: message.canId,
+        data: data,
+        intervalMs: 0, // 单次发送
+        repeatCount: 1,
+        line: command.line,
+      };
+
+      const result = await this.executeTcans(tcansCommand);
+      results.push(result);
+
+      // 如果任何一个报文发送失败，立即返回失败
+      if (!result.success) {
+        return result;
+      }
+    }
+
+    // 所有报文发送成功，返回最后一个结果
+    return results[results.length - 1];
   }
 
   /**

@@ -91,7 +91,7 @@ tbitfield 车速 车速值="车速", 车速单位="单位": 144, 1.0-2.7="车速
   const result = converter.convert(source);
 
   assertContains(result, '// tbitfield 车速');
-  assertContains(result, 'CAN ID: 0x144');  // 144 解析为十六进制0x144
+  assertContains(result, 'CAN IDs: 0x144');  // 144 解析为十六进制0x144
   assertContains(result, '车速值="车速", 车速单位="单位"');
 });
 
@@ -297,7 +297,32 @@ ttitle-end
   assertNotContains(nonCommentText, 'tbitfield ');
 });
 
-// 测试12: 错误处理 - 未定义的枚举值
+// 测试12: 转换多CAN ID的位域函数
+test('正确转换多CAN ID的位域函数', () => {
+  const source = `
+tenum 车速单位 0=km/h, 1=mph
+tenum 档位 0=P档, 3=D档
+tbitfield 车辆状态 车速="车速", 车速单位="单位", 档位="档位": 144, 1.0-2.7="车速"/100, 3.0-3.1="单位"; 260, 1.0-1.2="档位"
+
+ttitle=测试
+  1 tstart=测试用例
+    车辆状态 车速=100, 车速单位=km/h, 档位=D档
+  tend
+ttitle-end
+`;
+  const result = converter.convert(source);
+
+  // 验证位域函数定义注释包含所有CAN IDs
+  assertContains(result, '// tbitfield 车辆状态');
+  assertContains(result, 'CAN IDs: 0x144, 0x260');
+
+  // 验证生成了两条tcans命令
+  assertContains(result, '// 车辆状态 车速=100, 车速单位=km/h, 档位=D档');
+  assertContains(result, 'tcans 0x144, 10 27 00 00 00 00 00 00, 0, 1');
+  assertContains(result, 'tcans 0x260, 03 00 00 00 00 00 00 00, 0, 1');
+});
+
+// 测试13: 错误处理 - 未定义的枚举值
 test('检测未定义的枚举值', () => {
   const source = `
 tenum 档位 0=P档, 3=D档

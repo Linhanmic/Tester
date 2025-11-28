@@ -43,12 +43,17 @@ export interface BitFieldMapping {
   scale?: number; // 缩放因子 (例如: /100 表示 scale=100)
 }
 
+/** 位域报文映射 - 一个CAN ID的映射 */
+export interface BitFieldMessageMapping {
+  canId: number;
+  mappings: BitFieldMapping[];
+}
+
 /** 位域函数定义 */
 export interface BitFieldFunction {
   name: string;
   parameters: Map<string, string>; // 参数名 -> 显示名映射
-  canId: number;
-  mappings: BitFieldMapping[];
+  messages: BitFieldMessageMapping[]; // 支持多个CAN报文
   line: number;
 }
 
@@ -482,33 +487,51 @@ export class TesterParser {
       parameters.set(paramName, displayName);
     }
 
-    // 解析CAN ID和位域映射
-    const mappingParts = mappingSection.split(",").map(p => p.trim());
-    if (mappingParts.length < 2) {
+    // 解析多个CAN ID和位域映射
+    // 支持格式: CAN_ID1, 位域1, 位域2; CAN_ID2, 位域3
+    // 使用分号分隔不同的CAN报文
+    const messageSegments = mappingSection.split(";").map(s => s.trim()).filter(s => s.length > 0);
+    if (messageSegments.length === 0) {
       this.addError("tbitfield 格式错误，缺少CAN ID或位域映射");
       return null;
     }
 
-    const canId = this.parseHexValueDefaultHex(mappingParts[0]);
-    if (canId === null) {
-      this.addError(`无效的CAN ID: ${mappingParts[0]}`);
-      return null;
+    const messages: BitFieldMessageMapping[] = [];
+
+    for (const segment of messageSegments) {
+      const mappingParts = segment.split(",").map(p => p.trim());
+      if (mappingParts.length < 2) {
+        this.addError("tbitfield 格式错误，每个报文至少需要CAN ID和一个位域映射");
+        continue;
+      }
+
+      const canId = this.parseHexValueDefaultHex(mappingParts[0]);
+      if (canId === null) {
+        this.addError(`无效的CAN ID: ${mappingParts[0]}`);
+        continue;
+      }
+
+      const mappings: BitFieldMapping[] = [];
+      for (let i = 1; i < mappingParts.length; i++) {
+        const mappingStr = mappingParts[i];
+        const mapping = this.parseBitFieldMapping(mappingStr);
+        if (mapping) {
+          mappings.push(mapping);
+        }
+      }
+
+      messages.push({ canId, mappings });
     }
 
-    const mappings: BitFieldMapping[] = [];
-    for (let i = 1; i < mappingParts.length; i++) {
-      const mappingStr = mappingParts[i];
-      const mapping = this.parseBitFieldMapping(mappingStr);
-      if (mapping) {
-        mappings.push(mapping);
-      }
+    if (messages.length === 0) {
+      this.addError("tbitfield 未能解析出有效的CAN报文映射");
+      return null;
     }
 
     return {
       name: funcName,
       parameters,
-      canId,
-      mappings,
+      messages,
       line: this.currentLine,
     };
   }

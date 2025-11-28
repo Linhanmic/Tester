@@ -120,13 +120,14 @@ runTest('应该正确解析车速位域函数', () => {
   const funcDef = result.program!.bitFieldFunctions.get('车速');
   assert(funcDef !== undefined, '车速函数应该存在');
   assertEquals(funcDef!.name, '车速', '函数名称');
-  assertEquals(funcDef!.canId, 0x144, 'CAN ID');
+  assertEquals(funcDef!.messages.length, 1, '应该有1个CAN报文映射');
+  assertEquals(funcDef!.messages[0].canId, 0x144, 'CAN ID');
   assertEquals(funcDef!.parameters.get('车速值'), '车速值', '参数1');
   assertEquals(funcDef!.parameters.get('车速单位'), '车速单位', '参数2');
-  assertEquals(funcDef!.mappings.length, 2, '位域映射数量');
+  assertEquals(funcDef!.messages[0].mappings.length, 2, '位域映射数量');
 
   // 检查第一个位域映射
-  const mapping1 = funcDef!.mappings[0];
+  const mapping1 = funcDef!.messages[0].mappings[0];
   assertEquals(mapping1.paramName, '车速值', '映射1参数名');
   assertEquals(mapping1.scale, 100, '映射1缩放因子');
   assertEquals(mapping1.bitRange.startByte, 1, '映射1起始字节');
@@ -135,7 +136,7 @@ runTest('应该正确解析车速位域函数', () => {
   assertEquals(mapping1.bitRange.endBit, 7, '映射1结束位');
 
   // 检查第二个位域映射
-  const mapping2 = funcDef!.mappings[1];
+  const mapping2 = funcDef!.messages[0].mappings[1];
   assertEquals(mapping2.paramName, '车速单位', '映射2参数名');
   assert(mapping2.scale === undefined, '映射2不应有缩放因子');
 });
@@ -148,9 +149,31 @@ runTest('应该正确解析档位信息函数', () => {
   assert(result.errors.length === 0, '不应有解析错误');
   const funcDef = result.program!.bitFieldFunctions.get('档位信息');
   assert(funcDef !== undefined, '档位信息函数应该存在');
-  assertEquals(funcDef!.canId, 0x260, 'CAN ID');
-  assertEquals(funcDef!.mappings.length, 2, '位域映射数量');
-  assertEquals(funcDef!.mappings[1].scale, 10, '转速缩放因子');
+  assertEquals(funcDef!.messages.length, 1, '应该有1个CAN报文映射');
+  assertEquals(funcDef!.messages[0].canId, 0x260, 'CAN ID');
+  assertEquals(funcDef!.messages[0].mappings.length, 2, '位域映射数量');
+  assertEquals(funcDef!.messages[0].mappings[1].scale, 10, '转速缩放因子');
+});
+
+runTest('应该正确解析多CAN ID的位域函数', () => {
+  const parser = new TesterParser();
+  const text = 'tbitfield 车辆状态 车速="车速", 档位="档位": 144, 1.0-2.7="车速"/100; 260, 1.0-1.2="档位"';
+  const result = parser.parse(text);
+
+  assert(result.errors.length === 0, '不应有解析错误');
+  const funcDef = result.program!.bitFieldFunctions.get('车辆状态');
+  assert(funcDef !== undefined, '车辆状态函数应该存在');
+  assertEquals(funcDef!.messages.length, 2, '应该有2个CAN报文映射');
+
+  // 检查第一个CAN报文
+  assertEquals(funcDef!.messages[0].canId, 0x144, '第1个CAN ID');
+  assertEquals(funcDef!.messages[0].mappings.length, 1, '第1个报文的位域映射数量');
+  assertEquals(funcDef!.messages[0].mappings[0].paramName, '车速', '第1个报文参数名');
+
+  // 检查第二个CAN报文
+  assertEquals(funcDef!.messages[1].canId, 0x260, '第2个CAN ID');
+  assertEquals(funcDef!.messages[1].mappings.length, 1, '第2个报文的位域映射数量');
+  assertEquals(funcDef!.messages[1].mappings[0].paramName, '档位', '第2个报文参数名');
 });
 
 // ========== 位域函数调用解析测试 ==========

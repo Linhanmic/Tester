@@ -69,7 +69,8 @@ export class ScriptConverter {
       lines.push("// ========== 位域函数定义 ==========");
       for (const [name, funcDef] of this.bitFieldFunctions) {
         lines.push(`// tbitfield ${name}`);
-        lines.push(`//   CAN ID: 0x${funcDef.canId.toString(16).toUpperCase()}`);
+        const canIds = funcDef.messages.map(m => `0x${m.canId.toString(16).toUpperCase()}`).join(", ");
+        lines.push(`//   CAN IDs: ${canIds}`);
         const params: string[] = [];
         for (const [paramName, displayName] of funcDef.parameters) {
           params.push(`${paramName}="${displayName}"`);
@@ -155,7 +156,7 @@ export class ScriptConverter {
   }
 
   /**
-   * 转换位域函数调用为tcans命令
+   * 转换位域函数调用为tcans命令（支持多个CAN报文）
    */
   private convertBitFieldCall(command: BitFieldCallCommand): string[] {
     const lines: string[] = [];
@@ -171,65 +172,69 @@ export class ScriptConverter {
       .join(", ");
     lines.push(`    // ${command.functionName} ${argsStr}`);
 
-    // 生成CAN数据
-    const data = new Array(8).fill(0);
-
     // 创建显示名到参数名的映射
     const displayNameToParam = new Map<string, string>();
     for (const [paramName, displayName] of funcDef.parameters) {
       displayNameToParam.set(displayName, paramName);
     }
 
-    for (const mapping of funcDef.mappings) {
-      // mapping.paramName存储的是显示名，需要转换为实际的参数名
-      const actualParamName = displayNameToParam.get(mapping.paramName);
-      if (!actualParamName) {
-        throw new Error(`位域映射的参数名 "${mapping.paramName}" 未在函数定义中找到`);
-      }
+    // 为每个CAN报文生成tcans命令
+    for (const message of funcDef.messages) {
+      // 初始化8字节数据
+      const data = new Array(8).fill(0);
 
-      const argValue = command.arguments.get(actualParamName);
-      if (argValue === undefined) {
-        throw new Error(`缺少参数: ${actualParamName}`);
-      }
+      // 遍历该报文的每个位域映射
+      for (const mapping of message.mappings) {
+        // mapping.paramName存储的是显示名，需要转换为实际的参数名
+        const actualParamName = displayNameToParam.get(mapping.paramName);
+        if (!actualParamName) {
+          throw new Error(`位域映射的参数名 "${mapping.paramName}" 未在函数定义中找到`);
+        }
 
-      let numValue: number = 0;
-      if (typeof argValue === "string") {
-        // 查找枚举值
-        let found = false;
-        for (const [enumName, enumDef] of this.enums) {
-          for (const [num, name] of enumDef.values) {
-            if (name === argValue) {
-              numValue = num;
-              found = true;
+        const argValue = command.arguments.get(actualParamName);
+        if (argValue === undefined) {
+          throw new Error(`缺少参数: ${actualParamName}`);
+        }
+
+        let numValue: number = 0;
+        if (typeof argValue === "string") {
+          // 查找枚举值
+          let found = false;
+          for (const [enumName, enumDef] of this.enums) {
+            for (const [num, name] of enumDef.values) {
+              if (name === argValue) {
+                numValue = num;
+                found = true;
+                break;
+              }
+            }
+            if (found) {
               break;
             }
           }
-          if (found) {
-            break;
+          if (!found) {
+            throw new Error(`未找到枚举值: ${argValue}`);
           }
+        } else {
+          numValue = argValue;
         }
-        if (!found) {
-          throw new Error(`未找到枚举值: ${argValue}`);
+
+        // 应用缩放因子
+        if (mapping.scale) {
+          numValue = Math.round(numValue * mapping.scale);
         }
-      } else {
-        numValue = argValue;
+
+        // 写入位域
+        this.writeBitRange(data, mapping.bitRange, numValue);
       }
 
-      // 应用缩放因子
-      if (mapping.scale) {
-        numValue = Math.round(numValue * mapping.scale);
-      }
-
-      // 写入位域
-      this.writeBitRange(data, mapping.bitRange, numValue);
+      // 生成tcans命令
+      const dataStr = data
+        .map(b => b.toString(16).padStart(2, "0").toUpperCase())
+        .join(" ");
+      const canIdStr = message.canId.toString(16).toUpperCase();
+      lines.push(`    tcans 0x${canIdStr}, ${dataStr}, 0, 1`);
     }
-
-    // 生成tcans命令
-    const dataStr = data
-      .map(b => b.toString(16).padStart(2, "0").toUpperCase())
-      .join(" ");
-    const canIdStr = funcDef.canId.toString(16).toUpperCase();
-    lines.push(`    tcans 0x${canIdStr}, ${dataStr}, 0, 1`);
 
     return lines;
   }
