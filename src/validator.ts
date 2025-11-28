@@ -1,9 +1,12 @@
 import * as vscode from "vscode";
+import { TesterParser } from "./parser";
 
 interface ValidationError {
   line: number;
   message: string;
   severity: vscode.DiagnosticSeverity;
+  startChar?: number;
+  endChar?: number;
 }
 
 export class TesterValidator {
@@ -35,16 +38,16 @@ export class TesterValidator {
     // 核心校验：只校验块结构的配对情况
     this.validateBlockPairing(lines, errors);
 
+    // 位域函数参数校验
+    this.validateBitFieldCalls(text, lines, errors);
+
     // 转换为诊断信息
     const diagnostics: vscode.Diagnostic[] = errors.map((error) => {
       const line = document.lineAt(error.line);
-      // 诊断范围定位到整行
-      const range = new vscode.Range(
-        error.line,
-        0,
-        error.line,
-        line.text.length
-      );
+      // 如果提供了具体的字符位置，使用它；否则定位到整行
+      const range = error.startChar !== undefined && error.endChar !== undefined
+        ? new vscode.Range(error.line, error.startChar, error.line, error.endChar)
+        : new vscode.Range(error.line, 0, error.line, line.text.length);
 
       const diagnostic = new vscode.Diagnostic(
         range,
@@ -154,6 +157,162 @@ export class TesterValidator {
           severity: vscode.DiagnosticSeverity.Error,
         });
       }
+    }
+  }
+
+  /**
+   * 校验位域函数调用的参数
+   */
+  private validateBitFieldCalls(
+    text: string,
+    lines: string[],
+    errors: ValidationError[]
+  ): void {
+    // 使用解析器解析文档
+    const parser = new TesterParser();
+    const parseResult = parser.parse(text);
+
+    if (parseResult.errors.length > 0 || !parseResult.program) {
+      // 如果解析失败，跳过位域函数校验
+      return;
+    }
+
+    const enums = parseResult.program.enums;
+    const bitFieldFunctions = parseResult.program.bitFieldFunctions;
+
+    // 遍历每一行查找位域函数调用
+    for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+      const line = lines[lineIndex].trim();
+
+      // 跳过空行、注释行和定义行
+      if (
+        !line ||
+        line.startsWith("//") ||
+        line.startsWith("tenum") ||
+        line.startsWith("tbitfield") ||
+        line.startsWith("tset") ||
+        line.startsWith("ttitle") ||
+        line.startsWith("tstart") ||
+        line.startsWith("tcans") ||
+        line.startsWith("tcanr") ||
+        line.startsWith("tdelay") ||
+        line.startsWith("tconfirm") ||
+        line.startsWith("tdiagnose") ||
+        line === "tend" ||
+        line === "ttitle-end"
+      ) {
+        continue;
+      }
+
+      // 尝试匹配位域函数调用: 函数名 参数1=值1, 参数2=值2
+      const callMatch = line.match(/^(\w+)\s+(.+)$/);
+      if (!callMatch) {
+        continue;
+      }
+
+      const [, funcName, argsStr] = callMatch;
+
+      // 检查函数是否存在
+      const funcDef = bitFieldFunctions.get(funcName);
+      if (!funcDef) {
+        // 这可能不是位域函数调用，跳过
+        continue;
+      }
+
+      // 解析参数
+      const providedParams = new Map<string, string>();
+      const paramMatches = argsStr.matchAll(/(\w+)\s*=\s*([^,]+)/g);
+
+      for (const match of paramMatches) {
+        const paramName = match[1].trim();
+        const paramValue = match[2].trim();
+        providedParams.set(paramName, paramValue);
+      }
+
+      // 检查必需参数是否都提供了
+      const requiredParams = funcDef.parameters;
+      requiredParams.forEach((internalName, displayName) => {
+        if (!providedParams.has(displayName)) {
+          // 计算错误位置
+          const originalLine = lines[lineIndex];
+          const funcNameIndex = originalLine.indexOf(funcName);
+
+          errors.push({
+            line: lineIndex,
+            message: `位域函数"${funcName}"缺少必需参数: ${displayName}`,
+            severity: vscode.DiagnosticSeverity.Error,
+            startChar: funcNameIndex,
+            endChar: funcNameIndex + funcName.length,
+          });
+        }
+      });
+
+      // 检查枚举值是否有效
+      providedParams.forEach((value, paramDisplayName) => {
+        const internalName = requiredParams.get(paramDisplayName);
+        if (!internalName) {
+          // 参数名不存在
+          const originalLine = lines[lineIndex];
+          const paramIndex = originalLine.indexOf(paramDisplayName);
+
+          errors.push({
+            line: lineIndex,
+            message: `位域函数"${funcName}"不接受参数: ${paramDisplayName}`,
+            severity: vscode.DiagnosticSeverity.Error,
+            startChar: paramIndex,
+            endChar: paramIndex + paramDisplayName.length,
+          });
+          return;
+        }
+
+        // 检查是否为枚举值
+        let enumFound = false;
+        let isValidEnumValue = false;
+
+        enums.forEach((enumDef, enumName) => {
+          // 检查内部名称是否包含枚举名
+          if (
+            internalName.includes(enumName) ||
+            enumName.includes(internalName)
+          ) {
+            enumFound = true;
+
+            // 检查提供的值是否在枚举中
+            enumDef.values.forEach((displayValue, numericValue) => {
+              if (displayValue === value || numericValue.toString() === value) {
+                isValidEnumValue = true;
+              }
+            });
+          }
+        });
+
+        // 如果找到了对应的枚举但值无效
+        if (enumFound && !isValidEnumValue) {
+          const originalLine = lines[lineIndex];
+          const valueIndex = originalLine.indexOf(value, originalLine.indexOf(paramDisplayName));
+
+          // 获取有效的枚举值列表
+          const validValues: string[] = [];
+          enums.forEach((enumDef, enumName) => {
+            if (
+              internalName.includes(enumName) ||
+              enumName.includes(internalName)
+            ) {
+              enumDef.values.forEach((displayValue) => {
+                validValues.push(displayValue);
+              });
+            }
+          });
+
+          errors.push({
+            line: lineIndex,
+            message: `无效的枚举值"${value}"，有效值为: ${validValues.join(", ")}`,
+            severity: vscode.DiagnosticSeverity.Error,
+            startChar: valueIndex,
+            endChar: valueIndex + value.length,
+          });
+        }
+      });
     }
   }
 }

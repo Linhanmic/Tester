@@ -11,6 +11,9 @@ import { StatusBarManager } from "./statusBar";
 import { DeviceConfigManager } from "./deviceConfigManager";
 import { ScriptConverter } from "./converter";
 import { TesterCompletionProvider } from "./completionProvider";
+import { TesterDefinitionProvider } from "./definitionProvider";
+import { TesterReferenceProvider } from "./referenceProvider";
+import { TesterRenameProvider } from "./renameProvider";
 
 // 全局诊断集合
 let diagnosticCollection: vscode.DiagnosticCollection;
@@ -71,6 +74,30 @@ export function activate(context: vscode.ExtensionContext) {
       "tester",
       new TesterCompletionProvider(),
       '=', ' ', ','  // 触发字符
+    )
+  );
+
+  // 注册跳转定义提供程序
+  context.subscriptions.push(
+    vscode.languages.registerDefinitionProvider(
+      "tester",
+      new TesterDefinitionProvider()
+    )
+  );
+
+  // 注册引用查找提供程序
+  context.subscriptions.push(
+    vscode.languages.registerReferenceProvider(
+      "tester",
+      new TesterReferenceProvider()
+    )
+  );
+
+  // 注册重命名提供程序
+  context.subscriptions.push(
+    vscode.languages.registerRenameProvider(
+      "tester",
+      new TesterRenameProvider()
     )
   );
 

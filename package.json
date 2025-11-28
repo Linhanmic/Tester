@@ -2,7 +2,7 @@
   "name": "tester",
   "displayName": "Tester",
   "description": "Tester语言支持插件，用于CAN总线通信的开发、测试和调试。",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "publisher": "Linhanmic",
   "author": {
     "name": "Linhanmic",
