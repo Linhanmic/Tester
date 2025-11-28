@@ -117,5 +117,73 @@
             "$0"
         ],
         "description": "完整的测试文件模板"
+    },
+    "Enum Definition": {
+        "prefix": "tenum",
+        "body": [
+            "tenum ${1:枚举名} ${2:0=${3:值1}}, ${4:1=${5:值2}}, ${6:2=${7:值3}}"
+        ],
+        "description": "定义枚举类型"
+    },
+    "Bitfield Function - Single Message": {
+        "prefix": "tbitfield",
+        "body": [
+            "tbitfield ${1:函数名} ${2:参数1}=\"${3:变量1}\", ${4:参数2}=\"${5:变量2}\":",
+            "  ${6:0x100}, ${7:1.0-1.7}=\"${3}\"/${8:100}, ${9:2.0-2.7}=\"${5}\""
+        ],
+        "description": "定义位域函数（单CAN报文）"
+    },
+    "Bitfield Function - Multi Message": {
+        "prefix": "tbitfield-multi",
+        "body": [
+            "tbitfield ${1:函数名} ${2:参数1}=\"${3:变量1}\", ${4:参数2}=\"${5:变量2}\", ${6:参数3}=\"${7:变量3}\":",
+            "  ${8:0x100}, ${9:1.0-1.7}=\"${3}\"/${10:100}, ${11:2.0-2.7}=\"${5}\";",
+            "  ${12:0x200}, ${13:1.0-1.7}=\"${7}\""
+        ],
+        "description": "定义位域函数（多CAN报文）"
+    },
+    "Bitfield Call": {
+        "prefix": "call",
+        "body": [
+            "${1:函数名} ${2:参数1}=${3:值1}, ${4:参数2}=${5:值2}"
+        ],
+        "description": "调用位域函数"
+    },
+    "Confirm": {
+        "prefix": "tconfirm",
+        "body": [
+            "tconfirm ${1:请确认操作结果}"
+        ],
+        "description": "用户确认"
+    },
+    "Bitfield Example - Vehicle Speed": {
+        "prefix": "tbitfield-speed",
+        "body": [
+            "// 定义车速单位枚举",
+            "tenum 车速单位 0=km/h, 1=mph, 2=m/s",
+            "",
+            "// 定义车速信号位域函数",
+            "tbitfield 车速信号 车速值=\"车速\", 车速单位=\"单位\":",
+            "  ${1:0x144}, ${2:1.0-2.7}=\"车速\"/${3:100}, ${4:3.0-3.1}=\"单位\"",
+            "",
+            "// 调用示例",
+            "车速信号 车速值=${5:100}, 车速单位=${6:km/h}"
+        ],
+        "description": "车速信号位域函数完整示例"
+    },
+    "Bitfield Example - Gear Position": {
+        "prefix": "tbitfield-gear",
+        "body": [
+            "// 定义档位枚举",
+            "tenum 档位 0=P档, 1=R档, 2=N档, 3=D档, 4=S档",
+            "",
+            "// 定义档位信号位域函数",
+            "tbitfield 档位信号 当前档位=\"档位\":",
+            "  ${1:0x260}, ${2:1.0-1.2}=\"档位\"",
+            "",
+            "// 调用示例",
+            "档位信号 当前档位=${3:D档}"
+        ],
+        "description": "档位信号位域函数完整示例"
     }
 }

@@ -10,6 +10,7 @@ import { DeviceStatusViewProvider, MessageMonitorViewProvider, ManualSendViewPro
 import { StatusBarManager } from "./statusBar";
 import { DeviceConfigManager } from "./deviceConfigManager";
 import { ScriptConverter } from "./converter";
+import { TesterCompletionProvider } from "./completionProvider";
 
 // 全局诊断集合
 let diagnosticCollection: vscode.DiagnosticCollection;
@@ -61,6 +62,15 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.languages.registerDocumentFormattingEditProvider(
       "tester",
       new TesterFormattingProvider()
+    )
+  );
+
+  // 注册代码补全提供程序
+  context.subscriptions.push(
+    vscode.languages.registerCompletionItemProvider(
+      "tester",
+      new TesterCompletionProvider(),
+      '=', ' ', ','  // 触发字符
     )
   );
 

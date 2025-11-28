@@ -7,6 +7,9 @@
             "include": "#comments"
         },
         {
+            "include": "#bitfield-syntax"
+        },
+        {
             "include": "#commands"
         },
         {
@@ -25,6 +28,112 @@
                 {
                     "name": "comment.line.double-slash.tester",
                     "match": "//.*$"
+                }
+            ]
+        },
+        "bitfield-syntax": {
+            "patterns": [
+                {
+                    "name": "meta.enum.definition.tester",
+                    "match": "\\b(tenum)\\s+(\\w+)\\s+(.+)$",
+                    "captures": {
+                        "1": {
+                            "name": "keyword.declaration.enum.tester"
+                        },
+                        "2": {
+                            "name": "entity.name.type.enum.tester"
+                        },
+                        "3": {
+                            "name": "meta.enum.values.tester",
+                            "patterns": [
+                                {
+                                    "match": "(\\d+)\\s*=\\s*([^,]+)",
+                                    "captures": {
+                                        "1": {
+                                            "name": "constant.numeric.enum.key.tester"
+                                        },
+                                        "2": {
+                                            "name": "constant.other.enum.value.tester"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "meta.bitfield.definition.tester",
+                    "begin": "\\b(tbitfield)\\s+(\\w+)\\s+",
+                    "end": "$",
+                    "beginCaptures": {
+                        "1": {
+                            "name": "keyword.declaration.bitfield.tester"
+                        },
+                        "2": {
+                            "name": "entity.name.function.bitfield.tester"
+                        }
+                    },
+                    "patterns": [
+                        {
+                            "match": "(\\w+)\\s*=\\s*\"(\\w+)\"",
+                            "captures": {
+                                "1": {
+                                    "name": "variable.parameter.bitfield.display.tester"
+                                },
+                                "2": {
+                                    "name": "variable.parameter.bitfield.internal.tester"
+                                }
+                            }
+                        },
+                        {
+                            "match": "(\\d+\\.\\d+)\\s*-\\s*(\\d+\\.\\d+)\\s*=\\s*\"(\\w+)\"(?:\\s*/\\s*(\\d+))?",
+                            "captures": {
+                                "1": {
+                                    "name": "constant.numeric.bitfield.start.tester"
+                                },
+                                "2": {
+                                    "name": "constant.numeric.bitfield.end.tester"
+                                },
+                                "3": {
+                                    "name": "variable.other.bitfield.mapping.tester"
+                                },
+                                "4": {
+                                    "name": "constant.numeric.bitfield.scale.tester"
+                                }
+                            }
+                        },
+                        {
+                            "match": "(?:0x)?[0-9A-Fa-f]+",
+                            "name": "constant.numeric.hex.can-id.tester"
+                        }
+                    ]
+                },
+                {
+                    "name": "meta.bitfield.call.tester",
+                    "match": "^\\s*(\\w+)\\s+(\\w+)\\s*=\\s*([^,\\s]+)",
+                    "captures": {
+                        "1": {
+                            "name": "entity.name.function.bitfield.call.tester"
+                        },
+                        "2": {
+                            "name": "variable.parameter.name.tester"
+                        },
+                        "3": {
+                            "name": "constant.other.parameter.value.tester"
+                        }
+                    }
+                },
+                {
+                    "name": "meta.command.confirm.tester",
+                    "match": "\\b(tconfirm)\\s+(.+)$",
+                    "captures": {
+                        "1": {
+                            "name": "keyword.command.control.confirm.tester"
+                        },
+                        "2": {
+                            "name": "string.unquoted.confirm.message.tester"
+                        }
+                    }
                 }
             ]
         },

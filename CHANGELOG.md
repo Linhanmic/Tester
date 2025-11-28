@@ -6,6 +6,43 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## [v0.0.6] - 2025-11-28
+
+### Added
+
+#### 代码补全和智能提示
+- **位域函数名补全**：输入时自动提示可用的位域函数，并生成参数模板
+- **枚举值补全**：在函数调用时，自动提示可用的枚举值
+- **参数名补全**：智能提示函数参数名称
+- **关键字补全**：tenum、tbitfield、tconfirm关键字自动补全
+
+#### 语法高亮增强
+- **tenum关键字**：枚举定义高亮显示
+- **tbitfield关键字**：位域函数定义高亮显示
+- **tconfirm关键字**：用户确认命令高亮显示
+- **枚举值**：枚举值和数值映射高亮
+- **位域映射**：位域范围、缩放因子高亮
+- **函数调用**：位域函数调用语法高亮
+
+#### 代码片段模板
+- **tenum片段**：快速插入枚举定义
+- **tbitfield片段**：单CAN报文位域函数模板
+- **tbitfield-multi片段**：多CAN报文位域函数模板
+- **tconfirm片段**：用户确认命令模板
+- **tbitfield-speed片段**：车速信号完整示例
+- **tbitfield-gear片段**：档位信号完整示例
+
+### Technical Details
+- `src/completionProvider.ts`: 新增代码补全提供程序
+- `syntaxes/tester.tmLanguage.json`: 新增位域语法高亮规则
+- `snippets/tester.json`: 新增7个代码片段
+
+### Improved Developer Experience
+- 🎯 智能提示减少输入错误
+- ⚡ 代码片段提升编写速度
+- 🎨 语法高亮增强代码可读性
+- 📝 完整示例片段加速学习
+
 ## [v0.0.5] - 2025-11-28
 
 ### Added
