@@ -75,9 +75,32 @@ export class DeviceConfigManager {
 
     try {
       const content = fs.readFileSync(configPath, 'utf-8');
-      return JSON.parse(content);
+      const parsed = JSON.parse(content);
+
+      // 验证数据结构
+      if (!Array.isArray(parsed)) {
+        console.error('设备配置文件格式错误：不是数组');
+        vscode.window.showWarningMessage('设备配置文件格式错误，已重置');
+        return [];
+      }
+
+      // 验证每个配置项的基本结构
+      const validated = parsed.filter((config: any) => {
+        if (!config || typeof config !== 'object') {
+          return false;
+        }
+        if (!config.id || !config.name || typeof config.deviceType !== 'number') {
+          console.warn('跳过无效的设备配置项:', config);
+          return false;
+        }
+        return true;
+      });
+
+      return validated as SavedDeviceConfig[];
     } catch (error) {
-      console.error('Failed to read device config file:', error);
+      const errMsg = error instanceof Error ? error.message : String(error);
+      console.error('读取设备配置文件失败:', errMsg);
+      vscode.window.showErrorMessage(`读取设备配置失败: ${errMsg}`);
       return [];
     }
   }

@@ -268,6 +268,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   // 创建执行器实例
   const executor = new TesterExecutor();
+  context.subscriptions.push(executor);
 
   // 监听执行状态变更，更新CodeLens和状态栏
   executor.onStateChange((state) => {
@@ -563,4 +564,6 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 // This method is called when your extension is deactivated
-export function deactivate() {}
+export function deactivate() {
+  // 清理工作将由 context.subscriptions 中的 dispose 方法自动处理
+}

@@ -214,6 +214,8 @@ export class TesterExecutor {
   // 报文接收轮询
   private receivePollingTimer: ReturnType<typeof globalThis.setInterval> | null = null;
   private receivePollingInterval = 10; // 接收轮询间隔(ms)
+  private receiveErrorCount = 0; // 接收错误计数
+  private readonly MAX_RECEIVE_ERROR_LOGS = 5; // 最大错误日志次数
 
   constructor() {
     this.outputChannel = vscode.window.createOutputChannel("Tester 执行器");
@@ -461,6 +463,9 @@ export class TesterExecutor {
       return; // 已经在轮询中
     }
 
+    // 重置错误计数器
+    this.receiveErrorCount = 0;
+
     this.receivePollingTimer = globalThis.setInterval(() => {
       this.pollReceiveMessages();
     }, this.receivePollingInterval);
@@ -505,7 +510,14 @@ export class TesterExecutor {
           }
         }
       } catch (error: any) {
-        // 接收错误静默处理，避免频繁输出错误
+        // 接收错误处理：仅记录前几次错误，避免频繁输出
+        this.receiveErrorCount++;
+        if (this.receiveErrorCount <= this.MAX_RECEIVE_ERROR_LOGS) {
+          this.logError(`报文接收错误 (${this.receiveErrorCount}): ${error.message}`);
+          if (this.receiveErrorCount === this.MAX_RECEIVE_ERROR_LOGS) {
+            this.logError('接收错误过多，后续错误将不再记录');
+          }
+        }
       }
     }
   }
@@ -1565,5 +1577,27 @@ export class TesterExecutor {
    */
   public getOutputChannel(): vscode.OutputChannel {
     return this.outputChannel;
+  }
+
+  /**
+   * 清理资源（扩展卸载时调用）
+   */
+  public dispose(): void {
+    // 停止所有发送任务
+    this.stopAllTasks(false);
+
+    // 停止接收轮询
+    this.stopReceivePolling();
+
+    // 关闭设备
+    this.closeDevice();
+
+    // 清理事件发射器
+    this._onStateChange.dispose();
+    this._onMessageReceived.dispose();
+    this._onMessageSent.dispose();
+
+    // 清理输出通道
+    this.outputChannel.dispose();
   }
 }
