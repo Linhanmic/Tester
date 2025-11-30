@@ -161,6 +161,10 @@ export function activate(context: vscode.ExtensionContext) {
     if (result.success) {
       await deviceConfigManager.updateLastUsed(config.id);
       vscode.window.showInformationMessage(result.message);
+      // 更新所有通道的连接状态
+      for (const ch of config.channels) {
+        deviceStatusProvider.updateChannelConnectionStatus(config.id, ch.channelIndex, true);
+      }
       updateDeviceStatus();
       updateDeviceList();
     } else {
@@ -187,6 +191,56 @@ export function activate(context: vscode.ExtensionContext) {
   deviceStatusProvider.onDeleteConfig(async (configId) => {
     await deviceConfigManager.delete(configId);
     deviceStatusProvider.showMessage(true, '设备配置已删除');
+    updateDeviceList();
+  });
+
+  deviceStatusProvider.onDeleteChannel(async (request) => {
+    const success = await deviceConfigManager.deleteChannel(request.configId, request.channelIndex);
+    if (success) {
+      deviceStatusProvider.showMessage(true, '通道已删除');
+      updateDeviceList();
+    } else {
+      deviceStatusProvider.showMessage(false, '删除通道失败');
+    }
+  });
+
+  deviceStatusProvider.onDisconnectChannel(async (request) => {
+    // 更新通道连接状态为断开
+    deviceStatusProvider.updateChannelConnectionStatus(request.configId, request.channelIndex, false);
+    deviceStatusProvider.showMessage(true, '通道已断开连接');
+    // TODO: 如果需要实际断开硬件连接，需要在 executor 中实现 disconnectChannel 方法
+  });
+
+  deviceStatusProvider.onConnectAll(async () => {
+    const configs = deviceConfigManager.getAll();
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const config of configs) {
+      const result = await executor.openDeviceFromConfig(
+        config.deviceType,
+        config.deviceIndex,
+        config.channels
+      );
+
+      if (result.success) {
+        successCount++;
+        // 更新所有通道的连接状态
+        for (const ch of config.channels) {
+          deviceStatusProvider.updateChannelConnectionStatus(config.id, ch.channelIndex, true);
+        }
+      } else {
+        failCount++;
+      }
+    }
+
+    if (failCount === 0) {
+      deviceStatusProvider.showMessage(true, `成功连接 ${successCount} 个设备`);
+    } else {
+      deviceStatusProvider.showMessage(false, `连接完成：成功 ${successCount} 个，失败 ${failCount} 个`);
+    }
+
+    updateDeviceStatus();
     updateDeviceList();
   });
 

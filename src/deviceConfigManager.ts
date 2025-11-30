@@ -8,6 +8,7 @@ export interface DeviceChannelConfig {
   projectChannelIndex: number;
   arbitrationBaudrate: number;
   dataBaudrate?: number;
+  channelAlias?: string;
 }
 
 /** 设备配置 */
@@ -164,6 +165,36 @@ export class DeviceConfigManager {
       // 如果文件保存失败，回退到GlobalState
       await this.context.globalState.update(DeviceConfigManager.STORAGE_KEY, filtered);
     }
+  }
+
+  /**
+   * 从设备配置中删除指定通道
+   * @param configId 设备配置 ID
+   * @param channelIndex 设备通道索引
+   */
+  public async deleteChannel(configId: string, channelIndex: number): Promise<boolean> {
+    const config = this.get(configId);
+    if (!config) {
+      return false;
+    }
+
+    // 过滤掉指定的通道
+    const originalLength = config.channels.length;
+    config.channels = config.channels.filter(ch => ch.channelIndex !== channelIndex);
+
+    // 如果没有通道了，删除整个配置
+    if (config.channels.length === 0) {
+      await this.delete(configId);
+      return true;
+    }
+
+    // 如果有通道被删除，保存配置
+    if (config.channels.length < originalLength) {
+      await this.save(config);
+      return true;
+    }
+
+    return false;
   }
 
   /**

@@ -32,6 +32,7 @@ export interface OpenFromConfigRequest {
 }
 
 export interface SaveConfigRequest {
+  name: string;
   deviceType: number;
   deviceIndex: number;
   channels: Array<{
@@ -45,6 +46,11 @@ export interface SaveConfigRequest {
 }
 
 export interface DisconnectChannelRequest {
+  configId: string;
+  channelIndex: number;
+}
+
+export interface DeleteChannelRequest {
   configId: string;
   channelIndex: number;
 }
@@ -86,6 +92,11 @@ export class DeviceStatusViewProvider implements vscode.WebviewViewProvider {
     new vscode.EventEmitter<DisconnectChannelRequest>();
   public readonly onDisconnectChannel: vscode.Event<DisconnectChannelRequest> =
     this._onDisconnectChannel.event;
+
+  private _onDeleteChannel: vscode.EventEmitter<DeleteChannelRequest> =
+    new vscode.EventEmitter<DeleteChannelRequest>();
+  public readonly onDeleteChannel: vscode.Event<DeleteChannelRequest> =
+    this._onDeleteChannel.event;
 
   constructor(private readonly _extensionUri: vscode.Uri) {}
 
@@ -136,6 +147,12 @@ export class DeviceStatusViewProvider implements vscode.WebviewViewProvider {
             data.configId,
             data.channelIndex
           );
+          break;
+        case "deleteChannel":
+          this._onDeleteChannel.fire({
+            configId: data.configId,
+            channelIndex: data.channelIndex,
+          });
           break;
       }
     });
@@ -1161,9 +1178,14 @@ export class DeviceStatusViewProvider implements vscode.WebviewViewProvider {
         return;
       }
 
+      // 生成默认配置名称
+      const deviceTypeName = deviceTypeNames[deviceType] || 'Unknown';
+      const configName = deviceTypeName + '-' + deviceIndex;
+
       vscode.postMessage({
         type: 'saveConfig',
         request: {
+          name: configName,
           deviceType,
           deviceIndex,
           channels,
@@ -1191,12 +1213,23 @@ export class DeviceStatusViewProvider implements vscode.WebviewViewProvider {
       });
     }
 
-    // 删除设备配置
+    // 删除设备配置（整个配置）
     function deleteDevice(configId) {
       if (confirm('确定要删除此设备配置吗？')) {
         vscode.postMessage({
           type: 'deleteConfig',
           configId
+        });
+      }
+    }
+
+    // 删除单个通道
+    function deleteChannel(configId, channelIndex) {
+      if (confirm('确定要删除此通道吗？')) {
+        vscode.postMessage({
+          type: 'deleteChannel',
+          configId,
+          channelIndex
         });
       }
     }
@@ -1281,11 +1314,11 @@ export class DeviceStatusViewProvider implements vscode.WebviewViewProvider {
             </td>
             <td>
               <div class="actions-cell">
-                \${ch.connected ? 
+                \${ch.connected ?
                   '<button class="action-btn disconnect" onclick="disconnectChannel(\\'' + ch.configId + '\\', ' + ch.channelIndex + ')" title="断开连接"><svg class="icon" viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></button>' :
                   '<button class="action-btn connect" onclick="connectChannel(\\'' + ch.configId + '\\', ' + ch.channelIndex + ')" title="连接"><svg class="icon" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button>'
                 }
-                <button class="action-btn delete" onclick="deleteDevice('\${ch.configId}')" title="删除">
+                <button class="action-btn delete" onclick="deleteChannel(\\'' + ch.configId + '\\', ' + ch.channelIndex + ')" title="删除">
                   <svg class="icon" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
                 </button>
               </div>
