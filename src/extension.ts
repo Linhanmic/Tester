@@ -145,7 +145,7 @@ export function activate(context: vscode.ExtensionContext) {
   };
 
   // 监听设备配置操作
-  deviceStatusProvider.onOpenFromConfig(async (request) => {
+  deviceStatusProvider.onOpenFromConfig(async (request: { configId: string }) => {
     const config = deviceConfigManager.get(request.configId);
     if (!config) {
       vscode.window.showErrorMessage('设备配置不存在');
@@ -172,7 +172,18 @@ export function activate(context: vscode.ExtensionContext) {
     }
   });
 
-  deviceStatusProvider.onSaveConfig(async (request) => {
+  deviceStatusProvider.onSaveConfig(async (request: {
+    name: string;
+    deviceType: number;
+    deviceIndex: number;
+    channels: Array<{
+      channelIndex: number;
+      projectChannelIndex: number;
+      arbitrationBaudrate: number;
+      dataBaudrate?: number;
+    }>;
+    description?: string;
+  }) => {
     const config = {
       id: deviceConfigManager.generateId(),
       name: request.name,
@@ -188,13 +199,13 @@ export function activate(context: vscode.ExtensionContext) {
     updateDeviceList();
   });
 
-  deviceStatusProvider.onDeleteConfig(async (configId) => {
+  deviceStatusProvider.onDeleteConfig(async (configId: string) => {
     await deviceConfigManager.delete(configId);
     deviceStatusProvider.showMessage(true, '设备配置已删除');
     updateDeviceList();
   });
 
-  deviceStatusProvider.onDeleteChannel(async (request) => {
+  deviceStatusProvider.onDeleteChannel(async (request: { configId: string; channelIndex: number }) => {
     const success = await deviceConfigManager.deleteChannel(request.configId, request.channelIndex);
     if (success) {
       deviceStatusProvider.showMessage(true, '通道已删除');
@@ -204,7 +215,7 @@ export function activate(context: vscode.ExtensionContext) {
     }
   });
 
-  deviceStatusProvider.onDisconnectChannel(async (request) => {
+  deviceStatusProvider.onDisconnectChannel(async (request: { configId: string; channelIndex: number }) => {
     // 更新通道连接状态为断开
     deviceStatusProvider.updateChannelConnectionStatus(request.configId, request.channelIndex, false);
     deviceStatusProvider.showMessage(true, '通道已断开连接');
@@ -271,7 +282,7 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(executor);
 
   // 监听执行状态变更，更新CodeLens和状态栏
-  executor.onStateChange((state) => {
+  executor.onStateChange((state: 'idle' | 'running' | 'paused' | 'stopped') => {
     codeLensProvider.updateExecutionState(state);
     statusBar.setRunning(state === 'running');
   });
@@ -488,7 +499,7 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   // 监听手动发送请求
-  manualSendProvider.onSendMessage(async (request) => {
+  manualSendProvider.onSendMessage(async (request: { channel: number; id: number; data: number[]; isFD: boolean }) => {
     const result = await executor.manualSendMessage(
       request.channel,
       request.id,
@@ -499,7 +510,7 @@ export function activate(context: vscode.ExtensionContext) {
   });
 
   // 监听executor的报文发送事件，推送到监视视图
-  executor.onMessageSent((message) => {
+  executor.onMessageSent((message: { timestamp: number; channel: number; id: number; dlc: number; data: number[]; isFD: boolean }) => {
     messageMonitorProvider.addMessage({
       timestamp: message.timestamp,
       channel: message.channel,
@@ -512,7 +523,7 @@ export function activate(context: vscode.ExtensionContext) {
   });
 
   // 监听executor的报文接收事件，推送到监视视图
-  executor.onMessageReceived((message) => {
+  executor.onMessageReceived((message: { timestamp: number; channel: number; id: number; dlc: number; data: number[]; isFD: boolean }) => {
     messageMonitorProvider.addMessage({
       timestamp: message.timestamp,
       channel: message.channel,
@@ -527,7 +538,7 @@ export function activate(context: vscode.ExtensionContext) {
   // ========== 文档事件监听 ==========
 
   // 文档打开时验证
-  vscode.workspace.textDocuments.forEach((doc) => {
+  vscode.workspace.textDocuments.forEach((doc: vscode.TextDocument) => {
     if (doc.languageId === "tester") {
       validator.validateDocument(doc);
     }
@@ -535,7 +546,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   // 文档更改时验证
   context.subscriptions.push(
-    vscode.workspace.onDidChangeTextDocument((event) => {
+    vscode.workspace.onDidChangeTextDocument((event: vscode.TextDocumentChangeEvent) => {
       if (event.document.languageId === "tester") {
         validator.validateDocument(event.document);
       }
@@ -544,7 +555,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   // 文档打开时验证和刷新视图
   context.subscriptions.push(
-    vscode.workspace.onDidOpenTextDocument((doc) => {
+    vscode.workspace.onDidOpenTextDocument((doc: vscode.TextDocument) => {
       if (doc.languageId === "tester") {
         validator.validateDocument(doc);
       }
@@ -553,7 +564,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   // 文档关闭时清除诊断
   context.subscriptions.push(
-    vscode.workspace.onDidCloseTextDocument((doc) => {
+    vscode.workspace.onDidCloseTextDocument((doc: vscode.TextDocument) => {
       if (doc.languageId === "tester") {
         diagnosticCollection.delete(doc.uri);
       }

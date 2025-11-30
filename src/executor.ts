@@ -1260,31 +1260,43 @@ export class TesterExecutor {
 
   /**
    * 将值写入位域
+   *
+   * 此方法将一个数值按位写入到 CAN 报文的指定位域中。
+   * 例如：将值 5 (二进制 101) 写入位域 [1.0-1.2]，会在 CAN 数据字节1的第 0、2 位设置为 1。
+   *
+   * @param data - CAN 数据数组（最多 8 字节）
+   * @param range - 位域范围定义（字节.位 格式，如 1.0-1.7）
+   * @param value - 要写入的数值
+   * @throws Error 当位位置超出 CAN 数据范围时
    */
   private writeBitRange(data: number[], range: BitRange, value: number): void {
-    const startByte = range.startByte - 1; // 转换为0基索引
+    // 转换为 0 基索引（CAN 报文字节编号从 1 开始，数组索引从 0 开始）
+    const startByte = range.startByte - 1;
     const startBit = range.startBit;
     const endByte = range.endByte - 1;
     const endBit = range.endBit;
 
-    // 计算信号长度
+    // 计算信号长度（跨越的总位数）
+    // 例如：1.0-2.7 = (2-1)*8 + (7-0) + 1 = 16 位
     const signalLength = (endByte - startByte) * 8 + (endBit - startBit) + 1;
 
-    // Intel字节序：低位字节在前
+    // Intel 字节序（小端）：低位字节在前，从起始位置开始写入
     let currentBitPos = startByte * 8 + startBit;
 
+    // 逐位写入数值
     for (let i = 0; i < signalLength; i++) {
-      // 检查当前信号位是否为1
+      // 检查当前信号位是否为 1（使用位掩码提取第 i 位）
       if (value & (1 << i)) {
-        // 计算在CAN数据中的字节和位位置
+        // 计算在 CAN 数据中的字节索引和位索引
         const byteIdx = Math.floor(currentBitPos / 8);
         const bitIdx = currentBitPos % 8;
 
+        // 边界检查：确保不超出 CAN 标准数据帧的 8 字节限制
         if (byteIdx >= this.CAN_DATA_MAX_BYTES) {
           throw new Error(`位位置超出${this.CAN_DATA_MAX_BYTES}字节范围: ${byteIdx}`);
         }
 
-        // 设置对应位为1
+        // 使用位或操作设置对应位为 1（保持其他位不变）
         data[byteIdx] |= (1 << bitIdx);
       }
 
