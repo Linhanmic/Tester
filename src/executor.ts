@@ -213,9 +213,10 @@ export class TesterExecutor {
 
   // 报文接收轮询
   private receivePollingTimer: ReturnType<typeof globalThis.setInterval> | null = null;
-  private receivePollingInterval = 10; // 接收轮询间隔(ms)
+  private readonly RECEIVE_POLLING_INTERVAL_MS = 10; // 接收轮询间隔(ms)
   private receiveErrorCount = 0; // 接收错误计数
   private readonly MAX_RECEIVE_ERROR_LOGS = 5; // 最大错误日志次数
+  private readonly CAN_DATA_MAX_BYTES = 8; // CAN 标准数据最大字节数
 
   constructor() {
     this.outputChannel = vscode.window.createOutputChannel("Tester 执行器");
@@ -468,7 +469,7 @@ export class TesterExecutor {
 
     this.receivePollingTimer = globalThis.setInterval(() => {
       this.pollReceiveMessages();
-    }, this.receivePollingInterval);
+    }, this.RECEIVE_POLLING_INTERVAL_MS);
   }
 
   /**
@@ -1245,6 +1246,15 @@ export class TesterExecutor {
     }
 
     // 所有报文发送成功，返回最后一个结果
+    // 安全检查：确保 results 不为空
+    if (results.length === 0) {
+      return {
+        success: false,
+        command: command.functionName,
+        message: "位域函数没有生成任何 CAN 报文",
+        line: command.line,
+      };
+    }
     return results[results.length - 1];
   }
 
@@ -1270,8 +1280,8 @@ export class TesterExecutor {
         const byteIdx = Math.floor(currentBitPos / 8);
         const bitIdx = currentBitPos % 8;
 
-        if (byteIdx >= 8) {
-          throw new Error(`位位置超出8字节范围: ${byteIdx}`);
+        if (byteIdx >= this.CAN_DATA_MAX_BYTES) {
+          throw new Error(`位位置超出${this.CAN_DATA_MAX_BYTES}字节范围: ${byteIdx}`);
         }
 
         // 设置对应位为1

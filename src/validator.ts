@@ -28,11 +28,10 @@ export class TesterValidator {
     const lines = text.split("\n");
 
     // 预处理：删除//之后的注释内容，防止干扰关键字匹配
+    // 使用正则表达式提升性能
+    const commentPattern = /\/\/.*$/;
     for (let i = 0; i < lines.length; i++) {
-      const commentIndex = lines[i].indexOf("//");
-      if (commentIndex !== -1) {
-        lines[i] = lines[i].substring(0, commentIndex).trimEnd();
-      }
+      lines[i] = lines[i].replace(commentPattern, '').trimEnd();
     }
 
     // 核心校验：只校验块结构的配对情况

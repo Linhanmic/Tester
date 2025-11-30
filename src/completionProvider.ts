@@ -6,6 +6,53 @@ import { TesterParser, BitFieldFunction, EnumDefinition } from './parser';
  */
 export class TesterCompletionProvider implements vscode.CompletionItemProvider {
   /**
+   * 构建位域函数补全项
+   */
+  private buildBitFieldCompletionItem(
+    funcName: string,
+    funcDef: BitFieldFunction,
+    includeDetailedDocs: boolean = true
+  ): vscode.CompletionItem {
+    const item = new vscode.CompletionItem(funcName, vscode.CompletionItemKind.Function);
+
+    // 生成参数列表
+    const params: string[] = [];
+    funcDef.parameters.forEach((paramName, displayName) => {
+      params.push(`${displayName}=\${${params.length + 1}:值}`);
+    });
+
+    item.insertText = new vscode.SnippetString(`${funcName} ${params.join(', ')}`);
+    item.detail = includeDetailedDocs ? '位域函数' : '位域函数调用';
+
+    // 生成文档说明
+    const canIds = funcDef.messages.map(m => `0x${m.canId.toString(16).toUpperCase()}`).join(', ');
+
+    if (includeDetailedDocs) {
+      const paramDocs: string[] = [];
+      funcDef.parameters.forEach((param, display) => {
+        paramDocs.push(`- \`${display}\` → \`${param}\``);
+      });
+      item.documentation = new vscode.MarkdownString(
+        `**位域函数**: ${funcName}\n\n` +
+        `**CAN ID**: ${canIds}\n\n` +
+        `**参数**:\n${paramDocs.join('\n')}`
+      );
+    } else {
+      const paramNames: string[] = [];
+      funcDef.parameters.forEach((param, display) => {
+        paramNames.push(display);
+      });
+      item.documentation = new vscode.MarkdownString(
+        `**位域函数**: ${funcName}\n\n` +
+        `**CAN ID**: ${canIds}\n\n` +
+        `**参数**: ${paramNames.join(', ')}`
+      );
+    }
+
+    return item;
+  }
+
+  /**
    * 提供代码补全
    */
   public provideCompletionItems(
@@ -39,30 +86,7 @@ export class TesterCompletionProvider implements vscode.CompletionItemProvider {
         const matchingFunctions: vscode.CompletionItem[] = [];
         bitFieldFunctions.forEach((funcDef, funcName) => {
           if (funcName.startsWith(partialName) || partialName === '') {
-            const item = new vscode.CompletionItem(funcName, vscode.CompletionItemKind.Function);
-
-            // 生成参数列表
-            const params: string[] = [];
-            funcDef.parameters.forEach((paramName, displayName) => {
-              params.push(`${displayName}=\${${params.length + 1}:值}`);
-            });
-
-            item.insertText = new vscode.SnippetString(`${funcName} ${params.join(', ')}`);
-            item.detail = `位域函数`;
-
-            // 生成文档说明
-            const canIds = funcDef.messages.map(m => `0x${m.canId.toString(16).toUpperCase()}`).join(', ');
-            const paramDocs: string[] = [];
-            funcDef.parameters.forEach((param, display) => {
-              paramDocs.push(`- \`${display}\` → \`${param}\``);
-            });
-            item.documentation = new vscode.MarkdownString(
-              `**位域函数**: ${funcName}\n\n` +
-              `**CAN ID**: ${canIds}\n\n` +
-              `**参数**:\n${paramDocs.join('\n')}`
-            );
-
-            matchingFunctions.push(item);
+            matchingFunctions.push(this.buildBitFieldCompletionItem(funcName, funcDef, true));
           }
         });
 
@@ -74,26 +98,7 @@ export class TesterCompletionProvider implements vscode.CompletionItemProvider {
       // 如果没有匹配的函数调用，提供所有位域函数列表
       const functionItems: vscode.CompletionItem[] = [];
       bitFieldFunctions.forEach((funcDef, funcName) => {
-        const item = new vscode.CompletionItem(funcName, vscode.CompletionItemKind.Function);
-        const params: string[] = [];
-        funcDef.parameters.forEach((paramName, displayName) => {
-          params.push(`${displayName}=\${${params.length + 1}:值}`);
-        });
-        item.insertText = new vscode.SnippetString(`${funcName} ${params.join(', ')}`);
-        item.detail = '位域函数调用';
-
-        const canIds = funcDef.messages.map(m => `0x${m.canId.toString(16).toUpperCase()}`).join(', ');
-        const paramNames: string[] = [];
-        funcDef.parameters.forEach((param, display) => {
-          paramNames.push(display);
-        });
-        item.documentation = new vscode.MarkdownString(
-          `**位域函数**: ${funcName}\n\n` +
-          `**CAN ID**: ${canIds}\n\n` +
-          `**参数**: ${paramNames.join(', ')}`
-        );
-
-        functionItems.push(item);
+        functionItems.push(this.buildBitFieldCompletionItem(funcName, funcDef, false));
       });
 
       if (functionItems.length > 0) {
