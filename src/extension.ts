@@ -14,6 +14,7 @@ import { TesterCompletionProvider } from "./completionProvider";
 import { TesterDefinitionProvider } from "./definitionProvider";
 import { TesterReferenceProvider } from "./referenceProvider";
 import { TesterRenameProvider } from "./renameProvider";
+import { CanDeviceManager } from "./devices";
 
 // 全局诊断集合
 let diagnosticCollection: vscode.DiagnosticCollection;
@@ -576,5 +577,6 @@ export function activate(context: vscode.ExtensionContext) {
 
 // This method is called when your extension is deactivated
 export function deactivate() {
-  // 清理工作将由 context.subscriptions 中的 dispose 方法自动处理
+  // 清理设备管理器资源
+  CanDeviceManager.getInstance().dispose();
 }

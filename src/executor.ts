@@ -29,51 +29,20 @@ import {
   TesterProgram,
 } from "./parser";
 
-// CAN设备相关类型
-interface CanFrame {
-  id: number;
-  dlc: number;
-  data: number[];
-  transmitType?: number;
-}
-
-interface CanFDFrame {
-  id: number;
-  len: number;
-  data: number[];
-  flags?: number;
-  transmitType?: number;
-}
-
-interface ReceivedFrame {
-  id: number;
-  dlc: number;
-  data: number[];
-  timestamp: number;
-}
-
-interface ReceivedFDFrame {
-  id: number;
-  len: number;
-  data: number[];
-  flags: number;
-  timestamp: number;
-}
-
-interface CanChannelConfig {
-  canType: number;
-  accCode?: number;
-  accMask?: number;
-  reserved?: number;
-  filter?: number;
-  timing0?: number;
-  timing1?: number;
-  mode?: number;
-  abitTiming?: number;
-  dbitTiming?: number;
-  brp?: number;
-  pad?: number;
-}
+// 导入CAN设备接口
+import {
+  ICanDevice,
+  ICanChannel,
+  IChannelConfig,
+  ICanFrame,
+  ICanFDFrame,
+  IReceivedFrame,
+  IReceivedFDFrame,
+  CanProtocolType,
+  CanDeviceState,
+  CanDeviceManager,
+  ZlgCanDriver,
+} from "./devices";
 
 /** 发送任务 */
 interface SendTask {
@@ -177,11 +146,17 @@ export interface ChannelInfo {
 export class TesterExecutor {
   private outputChannel: vscode.OutputChannel;
   private parser: TesterParser;
-  private device: any = null;
-  private channelHandles: Map<number, number> = new Map();
+
+  // CAN设备相关（使用新接口）
+  private device: ICanDevice | null = null;
+  private channels: Map<number, ICanChannel> = new Map(); // 项目通道索引 -> ICanChannel
   private channelConfigs: ChannelConfig[] = [];
   private isCanFD: Map<number, boolean> = new Map();
   private channelIndexMap: Map<number, number> = new Map();
+
+  // 设备管理器
+  private deviceManager: CanDeviceManager;
+  private zlgDriver: ZlgCanDriver | null = null;
 
   // 设备是否已初始化
   private deviceInitialized: boolean = false;
@@ -190,9 +165,6 @@ export class TesterExecutor {
   // 程序定义（枚举和位域函数）
   private enums: Map<string, EnumDefinition> = new Map();
   private bitFieldFunctions: Map<string, BitFieldFunction> = new Map();
-
-  // ZLG CAN 模块引用
-  private zlgcanModule: any = null;
 
   // 发送任务管理
   private sendTasks: Map<number, SendTask> = new Map();
@@ -221,6 +193,7 @@ export class TesterExecutor {
   constructor() {
     this.outputChannel = vscode.window.createOutputChannel("Tester 执行器");
     this.parser = new TesterParser();
+    this.deviceManager = CanDeviceManager.getInstance();
   }
 
   /**
@@ -251,23 +224,24 @@ export class TesterExecutor {
       };
     }
 
-    const channels: ChannelInfo[] = [];
+    const channelInfos: ChannelInfo[] = [];
     for (const config of this.channelConfigs) {
-      channels.push({
+      const channel = this.channels.get(config.projectChannelIndex);
+      channelInfos.push({
         projectIndex: config.projectChannelIndex,
         deviceIndex: config.channelIndex,
         baudrate: config.arbitrationBaudrate,
         dataBaudrate: config.dataBaudrate,
         isFD: this.isCanFD.get(config.projectChannelIndex) || false,
-        running: this.channelHandles.has(config.projectChannelIndex),
+        running: channel?.isRunning || false,
       });
     }
 
     return {
-      connected: true,
+      connected: this.device.state === CanDeviceState.Connected,
       deviceType: this.channelConfigs[0]?.deviceId.toString() || '',
       deviceIndex: this.channelConfigs[0]?.deviceIndex || 0,
-      channels,
+      channels: channelInfos,
     };
   }
 
@@ -279,26 +253,26 @@ export class TesterExecutor {
       return { success: false, message: '设备未初始化' };
     }
 
-    const channelHandle = this.channelHandles.get(channel);
-    if (channelHandle === undefined) {
+    const canChannel = this.channels.get(channel);
+    if (!canChannel) {
       return { success: false, message: `通道 ${channel} 未初始化` };
     }
 
     try {
       if (isFD) {
-        const frame: CanFDFrame = {
+        const frame: ICanFDFrame = {
           id,
-          len: data.length,
+          length: data.length,
           data: [...data],
         };
-        this.device.transmitFD(channelHandle, frame);
+        await canChannel.transmitFD(frame);
       } else {
-        const frame: CanFrame = {
+        const frame: ICanFrame = {
           id,
           dlc: data.length,
           data: [...data],
         };
-        this.device.transmit(channelHandle, frame);
+        await canChannel.transmit(frame);
       }
 
       // 触发发送事件
@@ -485,18 +459,18 @@ export class TesterExecutor {
   /**
    * 轮询接收报文
    */
-  private pollReceiveMessages(): void {
+  private async pollReceiveMessages(): Promise<void> {
     if (!this.device || !this.deviceInitialized) {
       return;
     }
 
     // 遍历所有通道接收报文
-    for (const [projectChannelIndex, channelHandle] of this.channelHandles) {
+    for (const [projectChannelIndex, channel] of this.channels) {
       try {
         const isFD = this.isCanFD.get(projectChannelIndex) || false;
         const frames = isFD
-          ? this.device.receiveFD(channelHandle, 100, 0) // 非阻塞接收
-          : this.device.receive(channelHandle, 100, 0);
+          ? await channel.receiveFD(100, 0) // 非阻塞接收
+          : await channel.receive(100, 0);
 
         if (frames && frames.length > 0) {
           for (const frame of frames) {
@@ -504,7 +478,7 @@ export class TesterExecutor {
               timestamp: Date.now(),
               channel: projectChannelIndex,
               id: frame.id,
-              dlc: isFD ? frame.len : frame.dlc,
+              dlc: isFD ? (frame as IReceivedFDFrame).length : (frame as IReceivedFrame).dlc,
               data: frame.data,
               isFD,
             });
@@ -527,21 +501,21 @@ export class TesterExecutor {
    * 启动任务定时器
    */
   private startTaskTimer(task: SendTask): void {
-    const channelHandle = this.channelHandles.get(task.channelIndex);
-    if (channelHandle === undefined || !this.device) {
+    const channel = this.channels.get(task.channelIndex);
+    if (!channel || !this.device) {
       return;
     }
 
     const isFD = this.isCanFD.get(task.channelIndex) || false;
 
     // 立即发送第一帧
-    this.sendSingleFrame(channelHandle, task, isFD);
+    this.sendSingleFrame(channel, task, isFD);
 
     // 如果还有剩余次数，启动定时器
     if (task.remainingCount > 0) {
       task.timerId = globalThis.setInterval(() => {
         if (task.remainingCount > 0) {
-          this.sendSingleFrame(channelHandle, task, isFD);
+          this.sendSingleFrame(channel, task, isFD);
         }
 
         if (task.remainingCount <= 0) {
@@ -564,22 +538,29 @@ export class TesterExecutor {
   /**
    * 发送单帧
    */
-  private sendSingleFrame(channelHandle: number, task: SendTask, isFD: boolean): boolean {
+  private sendSingleFrame(channel: ICanChannel, task: SendTask, isFD: boolean): boolean {
     try {
       if (isFD) {
-        const frame: CanFDFrame = {
+        const frame: ICanFDFrame = {
           id: task.messageId,
-          len: task.data.length,
+          length: task.data.length,
           data: [...task.data],
         };
-        this.device.transmitFD(channelHandle, frame);
+        // 使用同步方式调用（定时器中不能很好地处理async）
+        channel.transmitFD(frame).catch(err => {
+          this.logError(`发送FD帧失败: ${err.message}`);
+          task.hasError = true;
+        });
       } else {
-        const frame: CanFrame = {
+        const frame: ICanFrame = {
           id: task.messageId,
           dlc: task.data.length,
           data: [...task.data],
         };
-        this.device.transmit(channelHandle, frame);
+        channel.transmit(frame).catch(err => {
+          this.logError(`发送帧失败: ${err.message}`);
+          task.hasError = true;
+        });
       }
 
       // 触发发送事件
@@ -904,17 +885,17 @@ export class TesterExecutor {
 
     this.log("初始化CAN设备...");
     this.channelConfigs = config.channels;
-    this.channelHandles.clear();
+    this.channels.clear();
     this.isCanFD.clear();
     this.channelIndexMap.clear();
 
     try {
-      // 动态加载ZlgCanDevice
-      this.zlgcanModule = require("./zlgcan/index.js");
-      const ZlgCanDevice = this.zlgcanModule.ZlgCanDevice;
-      const CanType = this.zlgcanModule.CanType;
-
-      this.device = new ZlgCanDevice();
+      // 确保ZLGCAN驱动已注册
+      if (!this.zlgDriver) {
+        this.zlgDriver = new ZlgCanDriver();
+        await this.zlgDriver.initialize();
+        this.deviceManager.registerDriver(this.zlgDriver);
+      }
 
       // 按设备分组初始化
       const deviceGroups = new Map<string, ChannelConfig[]>();
@@ -927,12 +908,23 @@ export class TesterExecutor {
       }
 
       // 对每个设备进行初始化
-      for (const [, channels] of deviceGroups) {
-        const firstChannel = channels[0];
+      for (const [, channelList] of deviceGroups) {
+        const firstChannel = channelList[0];
+
+        // 通过设备管理器创建设备
+        this.log(`  打开设备: type=${firstChannel.deviceId}, index=${firstChannel.deviceIndex}`);
+
+        try {
+          this.device = this.deviceManager.createDeviceByVendorCode(firstChannel.deviceId, 'zlgcan');
+        } catch (error: any) {
+          return {
+            success: false,
+            message: `创建设备失败: ${error.message}`,
+          };
+        }
 
         // 打开设备
-        this.log(`  打开设备: type=${firstChannel.deviceId}, index=${firstChannel.deviceIndex}`);
-        const opened = this.device.openDevice(firstChannel.deviceId, firstChannel.deviceIndex, 0);
+        const opened = await this.device.open(firstChannel.deviceIndex);
         if (!opened) {
           return {
             success: false,
@@ -941,65 +933,38 @@ export class TesterExecutor {
         }
 
         // 初始化每个通道
-        for (const channel of channels) {
-          const isFD = channel.dataBaudrate !== undefined;
-          this.isCanFD.set(channel.projectChannelIndex, isFD);
-          this.channelIndexMap.set(channel.projectChannelIndex, channel.channelIndex);
+        for (const channelCfg of channelList) {
+          const isFD = channelCfg.dataBaudrate !== undefined;
+          this.isCanFD.set(channelCfg.projectChannelIndex, isFD);
+          this.channelIndexMap.set(channelCfg.projectChannelIndex, channelCfg.channelIndex);
 
-          const channelConfig: CanChannelConfig = {
-            canType: isFD ? CanType.TYPE_CANFD : CanType.TYPE_CAN,
+          this.log(`  初始化通道: 项目通道${channelCfg.projectChannelIndex} -> 设备通道${channelCfg.channelIndex}`);
+          this.log(`    波特率: ${channelCfg.arbitrationBaudrate}kbps${isFD ? `, 数据域: ${channelCfg.dataBaudrate}kbps` : ""}`);
+
+          // 构建通道配置
+          const channelConfig: IChannelConfig = {
+            protocolType: isFD ? CanProtocolType.CANFD : CanProtocolType.CAN,
+            arbitrationBaudrate: channelCfg.arbitrationBaudrate,
+            dataBaudrate: channelCfg.dataBaudrate,
+            terminalResistorEnabled: true,
           };
 
-          this.log(`  初始化通道: 项目通道${channel.projectChannelIndex} -> 设备通道${channel.channelIndex}`);
-          this.log(`    波特率: ${channel.arbitrationBaudrate}kbps${isFD ? `, 数据域: ${channel.dataBaudrate}kbps` : ""}`);
+          try {
+            // 初始化通道
+            const channel = await this.device.initChannel(channelCfg.channelIndex, channelConfig);
 
-          // 设置通道波特率（必须在 initCanChannel 之前调用）
-          const ch = channel.channelIndex.toString();
-          const abitBaudrate = (channel.arbitrationBaudrate * 1000).toString(); // 转换为Hz
+            // 启动通道
+            await channel.start();
 
-          // 设置仲裁域波特率
-          const abitResult = this.device.setValue(`${ch}/canfd_abit_baud_rate`, abitBaudrate);
-          if (abitResult === 0) {
-            this.log(`    警告: 通道${ch} 设置仲裁段波特率失败，将使用默认值`);
-          }
-
-          // 只有在CAN FD模式下才设置数据域波特率
-          if (isFD) {
-            const dbitBaudrate = ((channel.dataBaudrate || 2000) * 1000).toString();
-            const dbitResult = this.device.setValue(`${ch}/canfd_dbit_baud_rate`, dbitBaudrate);
-            if (dbitResult === 0) {
-              this.log(`    警告: 通道${ch} 设置数据段波特率失败，将使用默认值`);
-            }
-          }
-
-          // 使能终端电阻（如果需要）
-          const resistResult = this.device.setValue(`${ch}/initenal_resistance`, "1");
-          if (resistResult === 0) {
-            this.log(`    警告: 通道${ch} 使能终端电阻失败`);
-          }
-
-          const handle = this.device.initCanChannel(channel.channelIndex, channelConfig);
-          if (handle === 0) {
+            this.channels.set(channelCfg.projectChannelIndex, channel);
+          } catch (error: any) {
             // 通道初始化失败，关闭设备后返回错误
             this.closeDevice();
             return {
               success: false,
-              message: `无法初始化通道 ${channel.channelIndex}`,
+              message: `初始化通道 ${channelCfg.channelIndex} 失败: ${error.message}`,
             };
           }
-
-          // 启动通道
-          const started = this.device.startCanChannel(handle);
-          if (!started) {
-            // 通道启动失败，关闭设备后返回错误
-            this.closeDevice();
-            return {
-              success: false,
-              message: `无法启动通道 ${channel.channelIndex}`,
-            };
-          }
-
-          this.channelHandles.set(channel.projectChannelIndex, handle);
         }
       }
 
@@ -1030,14 +995,14 @@ export class TesterExecutor {
 
     if (this.device) {
       try {
-        this.device.closeDevice();
+        this.device.close();
         this.log("设备已关闭");
       } catch (error: any) {
         this.logError(`关闭设备失败: ${error.message}`);
       }
       this.device = null;
     }
-    this.channelHandles.clear();
+    this.channels.clear();
     this.deviceInitialized = false;
     this.currentConfigHash = "";
   }
@@ -1314,8 +1279,8 @@ export class TesterExecutor {
 
     this.log(`    > ${cmdStr}`);
 
-    const channelHandle = this.channelHandles.get(command.channelIndex);
-    if (channelHandle === undefined) {
+    const channel = this.channels.get(command.channelIndex);
+    if (!channel) {
       return {
         command: cmdStr,
         success: false,
@@ -1384,8 +1349,8 @@ export class TesterExecutor {
 
     this.log(`    > ${cmdStr}`);
 
-    const channelHandle = this.channelHandles.get(command.channelIndex);
-    if (channelHandle === undefined) {
+    const channel = this.channels.get(command.channelIndex);
+    if (!channel) {
       return {
         command: cmdStr,
         success: false,
@@ -1397,7 +1362,7 @@ export class TesterExecutor {
     try {
       const isFD = this.isCanFD.get(command.channelIndex) || false;
       const startTime = Date.now();
-      let receivedFrame: ReceivedFrame | ReceivedFDFrame | null = null;
+      let receivedFrame: IReceivedFrame | IReceivedFDFrame | null = null;
 
       // 等待接收匹配的报文
       while (Date.now() - startTime < command.timeoutMs) {
@@ -1411,8 +1376,8 @@ export class TesterExecutor {
         }
 
         const frames = isFD
-          ? this.device.receiveFD(channelHandle, 100, 10)
-          : this.device.receive(channelHandle, 100, 10);
+          ? await channel.receiveFD(100, 10)
+          : await channel.receive(100, 10);
 
         for (const frame of frames) {
           if (frame.id === command.messageId) {

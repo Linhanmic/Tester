@@ -166,6 +166,7 @@
     "copy:native": "node -e \"require('fs').copyFileSync('build/Release/zlgcan.node', 'src/zlgcan/lib/zlgcan.node')\"",
     "copy:native:debug": "node -e \"require('fs').copyFileSync('build/Debug/zlgcan.node', 'src/zlgcan/lib/zlgcan.node')\"",
     "test:zlgcan": "npx ts-node test/zlgcan.test.ts",
+    "test:zlgcan-complete": "npx ts-node test/zlgcan-complete.test.ts",
     "package:extension": "vsce package"
   },
   "devDependencies": {
